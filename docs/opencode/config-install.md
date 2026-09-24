@@ -124,3 +124,35 @@ OpenCode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
 
 - 原始文档：`docs/config-install.md` @ `Just-Silver/opencode-tui-usage`
 - 相关设计（已废止，回退脚本安装）：`docs/superpowers/specs/2026-09-24-config-install-design.md`、`docs/superpowers/plans/2026-09-24-config-install.md`
+
+---
+
+## 8. 本地目录安装（补充；2026-09-25 在 opencode-goal 上实测）
+
+场景：不发布、也不走 git/npm spec，直接把**本机仓库目录**写进 `plugins[].package`（本地调试最省事，且改代码即时生效）。
+
+```jsonc
+{ "plugins": [ { "package": "E:/Code/Projects/Agent/opencode-goal", "options": {} } ] }
+```
+
+1. **目标必须是目录**：写成文件路径会被 `configured plugin path must be a directory` 丢弃（`ConfigPluginSource.scan`）。相对路径 `./x`、`../x` 相对**配置文件所在目录**；也可写 `file:///...`。
+2. **入口不走 `exports`，也不走 `main`**（与 §2 的 package 安装规则**不同**）。`Host.resolve({directory})` 依次试：
+
+   | 候选 | 实际路径（`packages/plugin/src/host.ts`） |
+   | --- | --- |
+   | server | `path.resolve(dir, "server")` → `<dir>/server.{ts,js,…}` |
+   | server 兜底 | `path.resolve(dir, "index")` → `<dir>/index.{ts,js,…}`（注意是 `subpath \|\| "index"`，**不是**目录本身） |
+
+   两个都不存在 → `entrypoints.server === undefined` → `scan()` **静默 `return []`**（无告警，与 §2 的「纯 TUI-only 被跳过」同因）。修法：仓库根放一个转发入口 `server.ts`：
+
+   ```ts
+   export { default } from "./src/server"
+   ```
+
+   > 出处提醒：这条约定 `opencode-tui-usage` 的 `AGENTS.md`「布局硬约束」早已写明——**目录内 `index.ts`/`server.ts` = server 入口**（发现式安装 `~/.config/opencode/plugins/<dir>/` 与配置安装的目录 spec 走**同一条** `Host.resolve({directory})`）。本资料先前只收了那份文档 §2 的 `exports` 规则，漏了这条，此处补上。
+
+   而 package/git 安装那条路径用「**包名 + `exports` 子路径**」（`opencode-goal/server` → `exports["./server"]`），`main`/根 `server.ts` 均不参与。两条路径都已实测。
+3. **本地插件会被宿主 watch**：`msg="loading plugin"` 之后紧跟对入口依赖图的 `watcher subscribe/started`（`src/**/*.ts` 全在内）→ 改代码即时重载。git/npm 安装**不会** watch，改完必须清 `git-*` 缓存或换 ref（§5）。
+4. **`plugin list` 的信号语义（2.0.15 补充）**：入口可解析时它**会列出**本地配置插件（形如 `opencode-goal  local  E:\...\server.ts`）——所以「列出」是有效的正面信号；但「没列出」仍是不确定（§5），判定以 `msg="loading plugin"` 且无 `failed to load` 为准。
+5. **一个会误判人的坑**：`Bun.resolveSync` 在**同一进程内缓存负面结果**。先探测（文件尚不存在，失败）→ 再创建文件 → 重新探测**仍然失败**，容易得出「加了入口也没用」的错误结论。真实宿主每次都是新进程，不受影响；自己写探针时要一次性建好文件再解析，或换进程。
+
