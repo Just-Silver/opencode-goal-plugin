@@ -56,6 +56,22 @@ bunx tsc --noEmit   # 类型检查
 
 配置项 `debug: false` 可让 `goal_debug` 不出现在模型工具表里；`debug_command_name` 可改命令名。
 
+## 真机冒烟（脚本）
+
+手动清单见 `docs/opencode/smoke-checklist.md`；批量跑用 `scripts/smoke-api.mjs`（传会话 ID 即可，不需要 TUI）：
+
+```bash
+bun scripts/smoke-api.mjs --session ses_xxxx              # 全部场景
+bun scripts/smoke-api.mjs --session ses_xxxx --scenario basic,block
+bun scripts/smoke-api.mjs --list                          # 场景列表
+```
+
+- 命令/中断/建删会话走 HTTP API（口令取自 `opencode pair`，路由从 `GET /openapi.json` 动态解析）；目标状态**只读**读 `opencode.db` 的 KV（复制 db + `-wal`/`-shm` 再读，不碰原库）；回执与事件断言抓 `GET /api/event`。
+- **会真的动**：往目标会话发 `/goal`、建/删临时会话、`opencode reload`、消耗模型额度 → 用专门的冒烟会话，别拿正在干活的会话。
+- 场景：`commands`（命令面）、`basic`（create→complete→clear）、`block`（报 blocker ×3 → blocked → resume）、`budget`（`token_budget=1` → budget-limited）、`interrupt`（中断 → paused）、`continuation`（跨轮续跑）、`conflict`（已有目标时拒 create）、`truncate`（>4000 字目标进 KV）、`kv-cleanup`（reload 后删会话 → 记录消失 + 判定 allow）。
+- 依赖 bun（`bun:sqlite`）与 `opencode` CLI。退出码 0 = 全过。
+- `continuation` / `truncate` 依赖模型配合（能力强的一次做完 / 会压缩目标），失败时先看日志再判断是不是插件问题。
+
 ## 发布
 
 见 `docs/opencode/releasing.md`；发布前跑 `docs/opencode/smoke-checklist.md`。
