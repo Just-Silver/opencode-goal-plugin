@@ -29,7 +29,7 @@
 ```
 
 - 要钉住版本（可复现，代价是不再显示有新版）：`"plugins": ["@justsilver/opencode-goal-plugin@0.1.0"]`
-- 本地目录 / git 安装（改代码即热重载、用未发布的提交）见 [`docs/opencode/development.md`](docs/opencode/development.md)。
+- 本地目录 / git 安装（改代码即热重载、用未发布的提交）见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 配置项
 

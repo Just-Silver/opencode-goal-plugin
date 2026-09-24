@@ -1,6 +1,6 @@
 # 开发与本地安装
 
-面向改这个插件的人。插件**使用者**只需要看根目录 `README.md`（安装 + 配置项）。
+面向改这个插件的人。**使用者**只需要看 `README.md`（安装 + 配置项）。
 
 ## 本地安装（改代码即热重载）
 
@@ -23,7 +23,7 @@
 - 只扫**直接子项**，不递归；直接子**目录** = 目录插件。
 - 直接子 `.ts` / `.js` 文件 = 文件插件；`.tsx` 不被发现。
 
-布局与入口解析细节见 `plugin-dev-gotchas.md` §3。
+布局与入口解析细节见 `docs/opencode/plugin-dev-gotchas.md` §3。
 
 ## git 安装
 
@@ -33,7 +33,7 @@
 }
 ```
 
-钉满 40 位 commit SHA 可复现且跳过解析；不钉版本会跟随默认分支，且 Windows 上解析时会 spawn `git ls-remote`（可能弹一下控制台窗口，见 `known-issues.md`）。
+钉满 40 位 commit SHA 可复现且跳过解析；不钉版本会跟随默认分支，且 Windows 上解析时会 spawn `git ls-remote`（可能弹一下控制台窗口，见 `docs/opencode/known-issues.md`）。
 
 ## 开发
 
@@ -58,4 +58,4 @@ bunx tsc --noEmit   # 类型检查
 
 ## 发布
 
-见 `releasing.md`；发布前跑 `smoke-checklist.md`。
+见 `docs/opencode/releasing.md`；发布前跑 `docs/opencode/smoke-checklist.md`。

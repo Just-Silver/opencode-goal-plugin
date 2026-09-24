@@ -31,19 +31,19 @@
 | **关键证据** | 宿主源码里搜 `ls-remote` = **0 命中**、`CREATE_NO_WINDOW` = **0 命中**；`windowsHide` 只出现在 desktop / cli 自己 spawn 的地方 ⇒ **弹窗来自依赖层**，不是 opencode 手写的代码 |
 | 可排除 | 宿主给 pacote 打的补丁 `patches/pacote@21.5.1.patch` 只处理 git tarball / 子目录取包，**与弹窗无关** |
 
-**影响**：README 推荐 git 安装 ⇒ 用户会遇到（只有钉死 SHA 才不弹）。
+**影响**：只有**选 git 安装**（见 `CONTRIBUTING.md`）且未钉 SHA 的用户会遇到；README 默认推荐的 npm 包名不受影响。
 
 **规避（按推荐度）**：
 
 1. **钉满 40 位 commit SHA**：上游明确 full commit hash 会跳过 update check → 完全不弹；代价是**没有自动更新**。本机全局配置就是这么装的。（**tag 是否同样跳过 —— 未验证**）
 2. 别删 `~/.cache/opencode/npm/**`（删了会强制重装 → 弹更多次）。
-3. 想「自动更新且不弹窗」：改用 **npm 包名**（走 registry HTTP，不 spawn git）——本插件已发布为 **`@justsilver/opencode-goal-plugin`**，npm 安装路径天然不弹，见 README 的安装一节。
+3. 想「能查新版且不弹窗」：用 **npm 包名**（走 registry HTTP，不 spawn git）——本插件已发布为 **`@justsilver/opencode-goal-plugin`**，也就是 README 安装一节推荐的方式。（注意：**不会自动更新**，要升级得主动 `opencode plugin update`）
 4. **发现式安装**（把插件目录放到 `~/.config/opencode/plugins/`）——本地开发时用的就是这条，无弹窗。
 
 **动作**：
 
-- [x] README 已写明：git spec 要 pin 40 位 SHA + Windows 弹窗提示（2026-09-25）
+- [x] git spec 要 pin 40 位 SHA + Windows 弹窗提示已写明（2026-09-25；同日随开发向内容从 README 移到 `CONTRIBUTING.md`）
 - [ ] 跟踪上游 #50868；上游关闭后回归验证（**去掉 pin** 并清掉 `<cache>/npm/git-*` 后重启，或直接跑 `opencode plugin check` → 看是否仍弹）
-- [ ] 若上游长期不修：评估在 README 更醒目处提示，或改为推荐发现式 / npm 安装
+- [ ] 若上游长期不修：评估在 `CONTRIBUTING.md` 更醒目处提示（README 已默认为 npm 安装，不再暴露 git 方式）
 
 **备注**：本插件自身**不 spawn 任何进程**（全仓 `child_process` / `spawn(` / `exec(` / `Bun.spawn` / `fork(` 均 0 命中；运行时 import 只有相对路径 + 宿主提供的 `@opencode/plugin` 类型），所以这个弹窗 100% 来自宿主 / 依赖层。
