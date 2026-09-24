@@ -113,6 +113,18 @@ describe("createEventRouter", () => {
     expect(await deps.repo.load("ses_1")).toBeUndefined()
   })
 
+  test("session.deleted without a top-level location still removes the record", async () => {
+    // 真机形状：session.deleted 的 payload 只有 sessionID，顶层**也没有** location
+    // （宿主 schema：`packages/schema/src/session-event.ts` 里 Deleted 的 schema = Base = { sessionID }）。
+    // 会话已删 → 归属回落查询必然失败 → 旧实现判成“不属于本实例”直接丢弃，记录永远清不掉。
+    // 注意上面的测试用的是 makeRouter，它会给事件补上本实例的 location —— 正好抹掉了这个真实边界条件。
+    const deps = { ...makeDeps(), sessionDirectory: async () => undefined }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle({ type: "session.deleted", data: { sessionID: "ses_1" }, location: undefined })
+    expect(await deps.repo.load("ses_1")).toBeUndefined()
+  })
+
   test("an interruption pauses an active goal", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))

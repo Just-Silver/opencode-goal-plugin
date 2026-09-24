@@ -24,6 +24,9 @@
 | 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
 | 11 | 命令回执**人看不到** | 命令没有返回通道；给人看必须传 `synthetic` 的 **`description`**（`text` 只给模型） |
 | 12 | 目标上下文**刷屏 + 历史膨胀** | 目标本体走 `hook("context")` 进 **system**（不落消息、不进转录）；驱动模型只发**一行**（`prompt` / `synthetic` 都能唤醒） |
+| 13 | 插件 API 抛的是 `Schema.TaggedError`，**没有 HTTP `status`** | 判「会话是否还在」要认 `_tag`（`Session.NotFoundError`）；按 `status === 404` 判**永远不成立**，清理逻辑会静默失效 |
+| 14 | `session.deleted` 的 payload **只有 `sessionID`**（不带 `location`） | 归属判定必须**豁免**它：会话已删时回落查询必然失败，否则删除事件被丢弃、KV 记录永久残留 |
+| 15 | 测试里**编造**错误/事件形状 | 会遮住真 bug：我们编了 `{status: 404}`、测试助手还自动补 `location`，155 个测试全绿却漏掉两个真 bug |
 
 ---
 
@@ -258,7 +261,43 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 
 ---
 
-## 8. 复核用命令速查
+## 8. 会话生命周期：删除事件与「会话是否还在」
+
+### 8.1 插件 API 的错误是 `Schema.TaggedError`，**没有 HTTP `status`**
+
+实测方法：在插件里调 `ctx.session.get`，把结果写进 `ctx.storage`，再读 KV（插件 `console.error` **不进** `~/.local/share/opencode/log/opencode.log`，所以别指望日志）。
+
+| 场景 | 抛出的对象 | 有 `status` 吗 |
+| --- | --- | --- |
+| 会话不存在 | `{ _tag: "Session.NotFoundError", sessionID }` | **没有**（实测 `keys = _tag,sessionID`、`status=""`） |
+| id 形态非法 | `{ _tag: "SchemaError", issue, … }`（`Expected a string starting with "ses"`） | **没有** |
+| 会话存在 | 正常 resolve，可读 `session.location.directory` | — |
+
+**坑**：按 `(error as { status?: number }).status === 404` 判「会话不存在」**在插件里永远不成立**。我们因此栽过：reconcile 在真机上**从没清掉过任何一条孤儿**（冷启动也不清），而单测因为用了编造的 `{status: 404}` 一直是绿的。
+
+**正确做法**：认 `_tag`（`Session.NotFoundError` / `SchemaError`），并保留 404/400 作为历史形态；**其它错误（500、超时、未知形状）一律当「探测失败」→ 宁可留，不可误删**。实现：`src/store/session-exists.ts`。
+
+### 8.2 `session.deleted` 的 payload 只有 `sessionID`（不带 `location`）
+
+- 出处：`packages/schema/src/session-event.ts` —— `Deleted` 用 `schema: Base`，`Base = { sessionID }`；对照 `Created` 才有 `location: Location.Ref`（真机事件流里 `session.created` 带 `C:\Users\13178`，`session.deleted` 不带）。
+- 后果：凡「先判归属、再处理」的路由都会把它判成「不属于本实例」丢掉；而此时会话已不存在，回落查询必然失败（§8.1）→ **删除事件永远被丢弃，KV 记录永久残留**。
+- **正确做法**：`session.deleted` **豁免归属判定**（会话已删时归属没有意义；`remove` 幂等，多 location 实例重复执行无害）。
+
+### 8.3 测试别编造事件/错误形状（我们就是这样骗过 155 个测试的）
+
+三处「编造」叠起来，正好把两个真 bug 全遮住：
+
+| 测试里的写法 | 真机形状 | 遮住了什么 |
+| --- | --- | --- |
+| `Object.assign(new Error("not found"), { status: 404 })`（`server.test.ts`） | `{ _tag: "Session.NotFoundError" }` | reconcile 不认 `_tag` → 孤儿永远清不掉 |
+| 测试助手 `inner.handle({ location: { directory: <本实例> }, ...e })`（`events.test.ts`） | `session.deleted` **没有** location | 删除事件的归属判定被永远"补"成 allow |
+| `sessionExists: async () => false`（假函数，`reconcile.test.ts`） | 真探针的抛错形状 | reconcile 的真判定根本没被测到 |
+
+**做法**：形状必须来自**真机实测**（插件内探针 → 写 KV），并在测试注释里注明出处；测试助手不要"顺手补全"真实事件里缺失的字段。
+
+---
+
+## 9. 复核用命令速查
 
 ```powershell
 # 后台 service 端点与口令

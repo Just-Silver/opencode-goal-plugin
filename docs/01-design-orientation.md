@@ -128,8 +128,8 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
   - 目标（含 **>4000 字符的完整原文**）、status、token 预算/用量、时间、`blockerKey/blockerStreak`、`autoTurns`、`lastContinuationAt`、`version` 等。
   - 即 **"会话文件 + 目标引用文件"合并成同一条记录**；超长目标不再需要单独文件。
   - `<sessionID>` = OpenCode 会话 ID。
-- **清理（事件驱动）**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal clear` 同。`complete/paused/blocked/budget-limited` 保留。
-- **启动兜底 reconcile**：`storage.scan({prefix:"goal:"})` 得本地 ID；用**官方 `ctx.session.get(id)` 判活**；不存在且记录 `updatedAt` 超过 5 分钟 → remove（mtime 保险的等价物）。查不到/出错一律跳过、不删。只在**启动**跑一次。
+- **清理（事件驱动）**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal clear` 同。`complete/paused/blocked/budget-limited` 保留。（**注意**：该事件不带 `location`，归属判定必须豁免它；见 gotchas §8.2。）
+- **启动兜底 reconcile**：`storage.scan({prefix:"goal:"})` 得本地 ID；用**官方 `ctx.session.get(id)` 判活**；不存在且记录 `updatedAt` 超过 5 分钟 → remove（mtime 保险的等价物）。查不到/出错一律跳过、不删。只在**启动**跑一次。（**实现偏差已修**：见 `plugin-dev-gotchas.md` §8.1——插件侧的「不存在」是 `_tag: "Session.NotFoundError"`，**没有** `status`。）
 - **超长目标的注入**：续跑注入摘要 + "调 `goal({op:"get"})` 取完整目标"（**工具引用取代文件路径**）；完成审计强制 `get_goal` 复核。
 
 ## 7. 已定 / 待议

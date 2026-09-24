@@ -135,16 +135,23 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
       // （/api/event），而宿主为**每个 location 各加载一份**本插件（官方文档：ctx.location 是本实例的
       // location，不是它收到的事件/会话的 location）。带 location 的事件直接比较；不带 location 的
       // 事件（session.execution.*）回落到查询会话所在目录，按会话缓存。
+      // `session.deleted` 的 payload 只有 sessionID（宿主 schema：`session-event.ts` 的 Deleted = Base），
+      // 因此它**永远不带 location**；而归属回落要查的那个会话已经不存在 → 会被判成“不属于本实例”
+      // 直接丢弃，记录永远清不掉（真机实测判定就是 `drop-unknown-session`）。
+      // 会话已删时归属没有意义，且 remove 幂等（多个 location 的实例重复执行无害）→ 放行它。
+      const ownershipExempt = event.type === "session.deleted"
       const directory = event.location?.directory
       const located = typeof directory === "string" ? directory : undefined
-      if (located !== undefined) {
-        if (located !== deps.locationDirectory) {
-          note(event, sessionID, "drop-other-location", located)
+      if (!ownershipExempt) {
+        if (located !== undefined) {
+          if (located !== deps.locationDirectory) {
+            note(event, sessionID, "drop-other-location", located)
+            return
+          }
+        } else if (!(await belongsToThisLocation(sessionID))) {
+          note(event, sessionID, "drop-unknown-session")
           return
         }
-      } else if (!(await belongsToThisLocation(sessionID))) {
-        note(event, sessionID, "drop-unknown-session")
-        return
       }
       note(event, sessionID, "allow", located)
 

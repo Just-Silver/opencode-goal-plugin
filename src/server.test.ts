@@ -83,6 +83,16 @@ const errored = async (): Promise<unknown> => {
   throw Object.assign(new Error("boom"), { status: 500 })
 }
 
+/**
+ * 真机实测（插件侧探针写入 KV）：会话不存在时抛的是 Schema.TaggedError，**没有 `status`**——
+ *   {"outcome":"threw","tag":"Session.NotFoundError","status":"","keys":"_tag,sessionID"}
+ * 上面的 `missing` 用的是 `status: 404`（历史/HTTP 形态），那是真实插件 API **从不产生**的形状；
+ * 只测它，真机上 reconcile 清不掉孤儿也发现不了。`missingReal` 就是当时漏掉的形状。
+ */
+const missingReal = async (): Promise<unknown> => {
+  throw { _tag: "Session.NotFoundError", sessionID: "ses_orphan" }
+}
+
 describe("server", () => {
   test("exports a plugin definition with an id and a setup function", () => {
     expect(plugin.id).toBe("opencode-goal")
@@ -103,6 +113,19 @@ describe("server", () => {
     expect(env.tools[1]?.options?.codemode).toBe(false)
     expect(env.hooks).toEqual(["context", "compaction"])
 
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(env.removed).toContain("goal:ses_orphan")
+    expect(env.store.has("goal:ses_orphan")).toBe(false)
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
+  test("reconciles away an orphan whose probe throws the measured TaggedError shape", async () => {
+    // 回归测试：真机上 reconcile 从来没清掉过孤儿，就是因为判定认的是 `status` 字段，而实测没有它。
+    const env = mockCtx(missingReal)
+    env.store.set("goal:ses_orphan", ORPHAN)
+
+    const cleanup = await plugin.setup(env.ctx as never)
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(env.removed).toContain("goal:ses_orphan")
     expect(env.store.has("goal:ses_orphan")).toBe(false)

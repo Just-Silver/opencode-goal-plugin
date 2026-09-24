@@ -9,6 +9,7 @@ import { createCompactionHook, createContextHook } from "./host/hooks"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
 import { createRepository } from "./store/repository"
+import { isMissingSessionError } from "./store/session-exists"
 import { isSessionID } from "./store/keys"
 import { reconcile } from "./store/reconcile"
 
@@ -140,8 +141,9 @@ export default {
           await ctx.session.get({ sessionID })
           return true
         } catch (error) {
-          const status = (error as { status?: number }).status
-          return !(status === 404 || status === 400)
+          // 实测：插件侧抛的是 Schema.TaggedError（Session.NotFoundError / SchemaError），
+          // **没有 `status` 字段** —— 只认 `status` 的旧实现在真机上永远探不到「不存在」。
+          return !isMissingSessionError(error)
         }
       },
       guardMs: options.reconcileGuardMinutes * 60_000,
