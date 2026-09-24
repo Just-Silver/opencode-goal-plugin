@@ -10,7 +10,8 @@
 4. **`omp/README.md`** —— oh-my-pi (OMP) 原生 goal 设计笔记（源码级）
 5. **`opencode/goal-plugins-landscape.md`** —— OpenCode 上现有 goal 插件（星标排序）
 6. **`opencode/config-install.md`** —— OpenCode 插件「配置安装」方法学（我们的分发方式）
-7. **`pi-ecosystem/README.md`** —— pi 生态的 goal 插件全景
+7. **`opencode/plugin-dev-gotchas.md`** —— **v2 插件开发踩坑记录（已验证）**；动插件前先读
+8. **`pi-ecosystem/README.md`** —— pi 生态的 goal 插件全景
 
 ## 目录结构
 
@@ -27,6 +28,7 @@ docs/
   opencode/
     config-install.md               # 配置安装方法学（自研汇总）
     goal-plugins-landscape.md       # OpenCode goal 插件现状
+    plugin-dev-gotchas.md           # v2 插件开发踩坑记录（已验证）
   pi-ecosystem/
     README.md                       # pi goal 插件生态
   articles/                         # 网页/文章类素材（待补）

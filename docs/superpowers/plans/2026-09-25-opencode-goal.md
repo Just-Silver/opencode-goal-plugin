@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **仅 OpenCode V2**：宿主 API 以 `E:\Code\Projects\Agent\Externals\opencode`（分支 `v2`，`@opencode/plugin@2.0.16`）为准。不做 v1 适配。
+- **仅 OpenCode V2**：宿主 API 以 `../Externals/opencode`（相对本仓库根；分支 `v2`，`@opencode/plugin@2.0.16`）为准。不做 v1 适配。
 - **零运行时依赖**：对 `@opencode/plugin`、`@opencode/schema`、`effect` 只用 `import type`（bun 会擦除）。运行时不得 `import` 这些包的值。
 - **插件导出形状**：入口模块**必须 `export default { id, setup }`**（宿主 `packages/core/src/plugin/module.ts` 只解码 `default`，并校验 `id` + `setup`/`effect`）。
 - **入口解析**：宿主按 `server` → 包根 解析（`packages/plugin/src/host.ts#resolve`）。本包 `exports` 同时给 `"."` 与 `"./server"` 指向 `./src/server.ts`。
@@ -3123,7 +3123,7 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 ```jsonc
 {
   "plugins": [
-    { "package": "file:E:/Code/Projects/Agent/opencode-goal", "options": {} }
+    { "package": "../opencode-goal", "options": {} }
   ]
 }
 ```

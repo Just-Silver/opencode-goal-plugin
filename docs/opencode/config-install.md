@@ -182,7 +182,7 @@ export { default } from "./src/server"
 场景：不发布、也不走 git/npm spec，直接把**本机仓库目录**写进 `plugins[].package`（本地调试最省事，且改代码即时生效）。
 
 ```jsonc
-{ "plugins": [ { "package": "E:/Code/Projects/Agent/opencode-goal", "options": {} } ] }
+{ "plugins": [ { "package": "../opencode-goal", "options": {} } ] }
 ```
 
 1. **目标必须是目录**：写成文件路径会被 `configured plugin path must be a directory` 丢弃（`ConfigPluginSource.scan`）。相对路径 `./x`、`../x` 相对**配置文件所在目录**；也可写 `file:///...`。

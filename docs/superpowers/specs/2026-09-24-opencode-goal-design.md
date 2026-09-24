@@ -2,7 +2,7 @@
 
 - 日期：2026-09-24
 - 状态：已定稿（自审通过，2026-09-24）
-- 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.x`；本机参考 `E:\Code\Projects\Agent\Externals\opencode`）
+- 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.x`；宿主源码检出 `../Externals/opencode`，相对本仓库根）
 - 参考：Codex `ext/goal`、OMP `packages/coding-agent/src/goals`（见 `docs/codex/`、`docs/omp/`）
 
 ## 1. 目标与非目标
@@ -192,7 +192,7 @@ TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`�
 - `docs/01-design-orientation.md`（决策记录）、`docs/00-comparison.md`
 - `docs/codex/README.md`、`docs/omp/README.md`
 - `docs/opencode/config-install.md`、`docs/opencode/goal-plugins-landscape.md`
-- 宿主源码：`E:\Code\Projects\Agent\Externals\opencode`（分支 `v2`）
+- 宿主源码：`../Externals/opencode`（分支 `v2`；相对本仓库根）
 
 ## 17. 修订记录
 
