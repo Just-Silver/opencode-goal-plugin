@@ -134,11 +134,11 @@ OpenCode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
 
 ---
 
-## 9. 目录型插件布局与发现器
+## 8. 目录型插件布局与发现器
 
 > 出处：`Just-Silver/opencode-tui-usage` 的 `AGENTS.md`。**本章已对宿主源码逐条复核**（快照见 §7），不是照抄结论。
 
-### 9.1 发现器（`packages/core/src/plugin/source-directory.ts`）
+### 8.1 发现器（`packages/core/src/plugin/source-directory.ts`）
 
 - 只扫两个目录：`<config>/plugin`、`<config>/plugins`（`names = ["plugin", "plugins"]`）。
 - 只看**直接子项**，**不递归**：
@@ -146,7 +146,7 @@ OpenCode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
   - 直接子**目录**（或指向目录的符号链接）→ **目录插件**。
   - 由此：旧的嵌套形态（如 `plugins/tui/foo.tsx`）**既不被 server 也不被 TUI 加载**，**且没有任何报错**。
 
-### 9.2 目录插件的入口（`packages/plugin/src/host.ts` 的 `Host.resolve({directory})`）
+### 8.2 目录插件的入口（`packages/plugin/src/host.ts` 的 `Host.resolve({directory})`）
 
 | 入口 | 解析顺序 | 约定文件 |
 | --- | --- | --- |
@@ -156,11 +156,11 @@ OpenCode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
 
 注意这条：判断方式是「**解析不出来就算没有**」，三个入口都**没有告警**。
 
-- **只做 server 的插件**（如本 goal 插件）必须有 `<dir>/server.ts`（或 `index.ts`）。**只有 `package.json` 的 `exports` 不算** —— `exports` 只在「按包名导入」（git/npm 安装）时生效，见 §2 与 §8 第 2 条。
+- **只做 server 的插件**（如本 goal 插件）必须有 `<dir>/server.ts`（或 `index.ts`）。**只有 `package.json` 的 `exports` 不算** —— `exports` 只在「按包名导入」（git/npm 安装）时生效，见 §2 与 §9 第 2 条。
 - **只做 TUI 的插件**同理必须有 `<dir>/tui.tsx`；而**配置安装**还额外需要一个 no-op **server** 入口，否则整包会被 server 跳过（§2、§6）。
-- **配置安装**（`plugins[].package` 指向目录）与**发现式安装**（目录放进 `<config>/plugins/`）走的是**同一条** `Host.resolve({directory})`。两者差别只在「从哪发现」与「是否被 watch」（后者见 §8 第 3 条）。
+- **配置安装**（`plugins[].package` 指向目录）与**发现式安装**（目录放进 `<config>/plugins/`）走的是**同一条** `Host.resolve({directory})`。两者差别只在「从哪发现」与「是否被 watch」（后者见 §9 第 3 条）。
 
-### 9.3 最小可用目录插件（server 侧，本仓库形态，实测）
+### 8.3 最小可用目录插件（server 侧，本仓库形态，实测）
 
 ```text
 <dir>/
@@ -177,7 +177,7 @@ export { default } from "./src/server"
 
 ---
 
-## 8. 本地目录安装（补充；2026-09-25 在 opencode-goal 上实测）
+## 9. 本地目录安装（补充；2026-09-25 在 opencode-goal 上实测）
 
 场景：不发布、也不走 git/npm spec，直接把**本机仓库目录**写进 `plugins[].package`（本地调试最省事，且改代码即时生效）。
 

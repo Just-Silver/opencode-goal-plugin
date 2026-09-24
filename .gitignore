@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# 文档里的源码归档需要入库（上面的 NuGet 规则 **/[Pp]ackages/* 会误伤 docs/**/sources/packages/）
+!docs/**/sources/**
