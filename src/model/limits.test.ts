@@ -17,4 +17,24 @@ describe("applyBudget", () => {
     const goal = { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), tokensUsed: 9999 }
     expect(applyBudget(goal, 10)).toEqual(goal)
   })
+
+  test("upgrades a blocked goal to budget-limited when over budget (budget outranks blocked)", () => {
+    const goal = {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }),
+      status: "blocked" as const,
+      tokensUsed: 100,
+    }
+    const limited = applyBudget(goal, 10)
+    expect(limited.status).toBe("budget-limited")
+    expect(limited.updatedAt).toBe(10)
+  })
+
+  test("leaves a blocked goal under budget untouched", () => {
+    const goal = {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }),
+      status: "blocked" as const,
+      tokensUsed: 99,
+    }
+    expect(applyBudget(goal, 10)).toEqual(goal)
+  })
 })

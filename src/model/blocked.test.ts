@@ -48,6 +48,15 @@ describe("applyBlocker", () => {
     expect(second.blockerStreak).toBe(2)
     expect(second.blockerKey).toBe("no-api-key")
   })
+
+  test("ignores non-active goals: same reference, no counting, no status change", () => {
+    for (const status of ["paused", "budget-limited"] as const) {
+      const original = { ...goal, status }
+      const result = applyBlocker(original, { key: "k", text: "t" }, 1, 10)
+      expect(result.goal).toBe(original)
+      expect(result.blocked).toBe(false)
+    }
+  })
 })
 
 describe("resetBlockerStreak", () => {

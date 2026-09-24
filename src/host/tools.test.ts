@@ -71,6 +71,7 @@ describe("createGoalTool", () => {
     })
     const tool = createGoalTool(deps)
     await expect(tool.execute({ op: "resume" }, ctx)).rejects.toThrow(/cannot resume/)
+    expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
   })
 
   test("drop removes the record", async () => {
@@ -142,6 +143,29 @@ describe("createGoalTool", () => {
 
   test("block reaching the budget limit returns the budget instruction", async () => {
     const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 3, tokenBudget: 5 } })
+    await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }), tokensUsed: 5 })
+    const tool = createGoalTool(deps)
+    const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
+    expect(result.goal.status).toBe("budget-limited")
+    expect(result.instruction).toContain("token budget")
+  })
+
+  test("block on an over-budget goal keeps it budget-limited (budget outranks blocked)", async () => {
+    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 1, tokenBudget: 5 } })
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }),
+      status: "budget-limited",
+      tokensUsed: 5,
+    })
+    const tool = createGoalTool(deps)
+    const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
+    expect(result.goal.status).toBe("budget-limited")
+    expect(result.instruction).toContain("token budget")
+    expect(result.instruction).not.toContain("blocked")
+  })
+
+  test("block that both reaches the threshold and exceeds budget yields budget-limited", async () => {
+    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 1, tokenBudget: 5 } })
     await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }), tokensUsed: 5 })
     const tool = createGoalTool(deps)
     const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))

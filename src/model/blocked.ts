@@ -25,6 +25,8 @@ export function applyBlocker(
   threshold: number,
   now: number,
 ): { goal: Goal; blocked: boolean } {
+  // 只有 active 才计数/改状态：非 active（paused / blocked / budget-limited / complete）原样返回同一引用。
+  if (goal.status !== "active") return { goal, blocked: false }
   const key = normalizeBlockerKey(report.key)
   const streak = goal.blockerKey === key ? goal.blockerStreak + 1 : 1
   const blocked = streak >= threshold
