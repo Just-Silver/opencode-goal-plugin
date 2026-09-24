@@ -201,6 +201,13 @@ async function belongsToThisLocation(sessionID: string) {
 
 **结论**：`package` 写不写版本都**不会自动更新**；只有**不钉版本**（mutable）时才**能被检测到有新版**，再用 `opencode plugin update` 升级。要可复现就钉版本，代价是不再提示新版。
 
+**怎么发现新版（源码 + 实测）**：
+
+- **服务启动时会自动查一次**：`PluginSupervisor.activate()` 对每个包插件调 `PluginUpdate.check(target)`（非 refresh），结果落到 inventory 的 `source.outdated`；缓存是**进程内**的（24h 或重启失效）。
+- **但 TUI 不主动提示**：`plugin.updated` 事件只让 `/plugins` 面板 refetch；`syncServerPlugins` 只对**加载失败**弹 toast，`outdated` 不弹任何通知。
+- **TUI 面板**（`/plugins`，或命令面板搜 "Plugins"）：Server 段那行 footer 显示 `版本, update available`；面板内有 `check for updates`（立刻重查、覆盖 24h 缓存）与 `update`（就地升级）两个动作。
+- **CLI**：`opencode plugin check` 打印 `名字 版本 (current | update available | check failed)`（走 `refresh: true`；registry 走 HTTP，无弹窗）；而 `opencode plugin list` 只有 `ID/VERSION/SOURCE` 表格，**不含**有无新版的信息。
+
 **Windows 弹窗的真正触发点**：只有**需要解析未钉版本的 git 源**时才 spawn `git ls-remote` —— 即首次安装、以及 `opencode plugin check` / `update`。registry 包的解析与检查都走 HTTP ⇒ **npm 安装路径不会有这个弹窗**；钉满 commit SHA 的 git 源也能跳过解析。
 
 ---
