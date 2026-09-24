@@ -58,6 +58,13 @@ describe("createGoalTool", () => {
     await expect(tool.execute({ op: "create", objective: "second" }, ctx)).rejects.toThrow(/already open/)
   })
 
+  test("create is refused for a restricted agent before writing", async () => {
+    const deps = makeDeps({ isRestricted: () => true })
+    const tool = createGoalTool(deps)
+    await expect(tool.execute({ op: "create", objective: "x" }, ctx)).rejects.toThrow(/cannot create/)
+    expect(await deps.repo.load("ses_1")).toBeUndefined()
+  })
+
   test("get returns null when no goal exists", async () => {
     const tool = createGoalTool(makeDeps())
     expect(parse(await tool.execute({ op: "get" }, ctx)).goal).toBeNull()

@@ -7,7 +7,6 @@ import { createEventRouter, type EventLike } from "./host/events"
 import { createCompactionHook, createContextHook } from "./host/hooks"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
-import { createTurnTracker } from "./host/turn"
 import { createRepository } from "./store/repository"
 import { reconcile } from "./store/reconcile"
 
@@ -58,18 +57,22 @@ export default {
 
     // 事件：记账、轮边界、空闲续跑、会话删除
     const abort = new AbortController()
-    const tracker = createTurnTracker()
     const continuation = createContinuation(deps, {
       prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
     })
-    const router = createEventRouter(deps, tracker, continuation)
+    const router = createEventRouter(deps, continuation)
     void (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: abort.signal })) {
-          await router.handle(event as unknown as EventLike)
+          // 单个事件失败只记录并继续：否则一次 handle 拒绝会静默终止整条事件循环。
+          try {
+            await router.handle(event as unknown as EventLike)
+          } catch (error) {
+            console.error("opencode-goal: event handling failed", error)
+          }
         }
-      } catch {
-        // 订阅中断/出错不致命
+      } catch (error) {
+        console.error("opencode-goal: event subscription failed", error)
       }
     })()
 

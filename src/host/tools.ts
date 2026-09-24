@@ -56,6 +56,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
 
       switch (args.op) {
         case "create": {
+          if (deps.isRestricted(context.agent)) throw new Error("goal: this agent cannot create a goal")
           if (existing && isOpenStatus(existing.status))
             throw new Error(`goal: a goal is already open (${existing.status}); complete or drop it first`)
           const check = normalizeObjective(args.objective ?? "", deps.options.maxObjectiveChars)

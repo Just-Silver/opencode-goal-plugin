@@ -3,7 +3,6 @@ import { DEFAULT_OPTIONS } from "../config"
 import { createGoal } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
 import { createEventRouter } from "./events"
-import { createTurnTracker } from "./turn"
 import type { GoalDeps } from "./deps"
 
 function memoryStorage(): StorageLike {
@@ -42,7 +41,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const prompts: string[] = []
-    const router = createEventRouter(deps, createTurnTracker(), {
+    const router = createEventRouter(deps, {
       onIdle: async (_sessionID, agentId) => {
         prompts.push(agentId)
         return true
@@ -66,7 +65,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, createTurnTracker(), {
+    const router = createEventRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -74,7 +73,9 @@ describe("createEventRouter", () => {
     })
 
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
-    await router.handle(idle("ses_1")) // 首次空闲：注入续跑（automatic 标记置位）
+    // 用户轮：其 idle 注入第一轮续跑（automatic 标记置位）
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1"))
     for (let turn = 0; turn < 3; turn++) {
       await router.handle(busy("ses_1"))
       await router.handle(idle("ses_1"))
@@ -89,7 +90,7 @@ describe("createEventRouter", () => {
   test("session.deleted removes the record", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const router = createEventRouter(deps, createTurnTracker(), { onIdle: async () => false })
+    const router = createEventRouter(deps, { onIdle: async () => false })
     await router.handle({ type: "session.deleted", data: { sessionID: "ses_1" } })
     expect(await deps.repo.load("ses_1")).toBeUndefined()
   })
@@ -97,7 +98,7 @@ describe("createEventRouter", () => {
   test("an interruption pauses an active goal", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const router = createEventRouter(deps, createTurnTracker(), { onIdle: async () => false })
+    const router = createEventRouter(deps, { onIdle: async () => false })
     await router.handle({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
     expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
   })
@@ -109,7 +110,7 @@ describe("createEventRouter", () => {
       blockerKey: "k",
       blockerStreak: 2,
     })
-    const router = createEventRouter(deps, createTurnTracker(), { onIdle: async () => false })
+    const router = createEventRouter(deps, { onIdle: async () => false })
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle(busy("ses_1"))
     await router.handle({ type: "session.text.ended", data: { sessionID: "ses_1", text: "moving on" } })
@@ -126,10 +127,123 @@ describe("createEventRouter", () => {
       blockerKey: "k",
       blockerStreak: 1,
     })
-    const router = createEventRouter(deps, createTurnTracker(), { onIdle: async () => false })
+    const router = createEventRouter(deps, { onIdle: async () => false })
     await router.handle(busy("ses_1"))
     await router.handle({ type: "session.tool.called", data: { sessionID: "ses_1", input: { op: "block" } } })
     await router.handle(idle("ses_1"))
     expect((await deps.repo.load("ses_1"))?.blockerStreak).toBe(1)
+  })
+
+  test("keeps turn state per session", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_a", createGoal({ goalId: "ga", objective: "o", now: 0 }))
+    await deps.repo.save("ses_b", createGoal({ goalId: "gb", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = createEventRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+
+    // A 完成一个用户轮 → 注入续跑，A 置 pending
+    await router.handle(busy("ses_a"))
+    await router.handle(idle("ses_a"))
+    // B 走一个用户轮（无自己的 pending）→ 不得消费 A 的 pending
+    await router.handle(busy("ses_b"))
+    await router.handle(idle("ses_b"))
+    expect((await deps.repo.load("ses_b"))?.emptyStreak).toBe(0)
+
+    // A 的 pending 仍在：A 的下一轮是 automatic 空转
+    await router.handle(busy("ses_a"))
+    await router.handle(idle("ses_a"))
+    expect((await deps.repo.load("ses_a"))?.emptyStreak).toBe(1)
+    expect(prompts).toEqual(["ses_a", "ses_b", "ses_a"])
+  })
+
+  test("a repeated idle settles the turn only once", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    let injected = 0
+    const router = createEventRouter(deps, {
+      onIdle: async () => {
+        injected += 1
+        return true
+      },
+    })
+
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1")) // 用户轮 → 注入一次
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1")) // automatic 空转 → 注入一次
+    await router.handle(idle("ses_1")) // 重复 idle：不再结算
+
+    expect((await deps.repo.load("ses_1"))?.emptyStreak).toBe(1)
+    expect(injected).toBe(2)
+  })
+
+  test("user-triggered turns never grow the empty streak", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = createEventRouter(deps, { onIdle: async () => false })
+    for (let turn = 0; turn < 3; turn++) {
+      await router.handle(busy("ses_1"))
+      await router.handle(idle("ses_1"))
+    }
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("active")
+    expect(goal?.emptyStreak).toBe(0)
+  })
+
+  test("an idle without a preceding busy neither settles nor continues", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    let injected = 0
+    const router = createEventRouter(deps, {
+      onIdle: async () => {
+        injected += 1
+        return true
+      },
+    })
+    await router.handle(idle("ses_1"))
+    expect(injected).toBe(0)
+    expect((await deps.repo.load("ses_1"))?.emptyStreak).toBe(0)
+  })
+
+  test("an interruption discards the pending continuation", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = createEventRouter(deps, { onIdle: async () => true })
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1")) // 注入续跑 → pending 置位
+    await router.handle({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
+    // 用户恢复目标后，下一轮不应被残留的 pending 误标为 automatic
+    const paused = (await deps.repo.load("ses_1"))!
+    await deps.repo.save("ses_1", { ...paused, status: "active" })
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.emptyStreak).toBe(0)
+  })
+
+  test("session.deleted clears per-session state", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    let injected = 0
+    const router = createEventRouter(deps, {
+      onIdle: async () => {
+        injected += 1
+        return true
+      },
+    })
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1")) // pending 置位 + 注入
+    await router.handle({ type: "session.deleted", data: { sessionID: "ses_1" } })
+    expect(await deps.repo.load("ses_1")).toBeUndefined()
+
+    const before = injected
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1"))
+    expect(await deps.repo.load("ses_1")).toBeUndefined()
+    expect(injected).toBe(before)
   })
 })
