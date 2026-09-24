@@ -277,8 +277,8 @@ describe("createEventRouter", () => {
     const router = makeRouter(
       deps,
       createContinuation(deps, {
-        prompt: async (sessionID) => {
-          prompts.push(sessionID)
+        deliver: async (input) => {
+          prompts.push(input.sessionID)
         },
       }),
     )
@@ -294,8 +294,8 @@ describe("createEventRouter", () => {
     const router = makeRouter(
       deps,
       createContinuation(deps, {
-        prompt: async (sessionID) => {
-          prompts.push(sessionID)
+        deliver: async (input) => {
+          prompts.push(input.sessionID)
         },
       }),
     )
@@ -312,8 +312,8 @@ describe("createEventRouter", () => {
     const router = makeRouter(
       deps,
       createContinuation(deps, {
-        prompt: async (sessionID) => {
-          prompts.push(sessionID)
+        deliver: async (input) => {
+          prompts.push(input.sessionID)
         },
       }),
     )

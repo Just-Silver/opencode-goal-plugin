@@ -65,6 +65,8 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 - `/goal pause` / `/goal resume` / `/goal clear`：服务端确定性处理（不消耗 token）。
 - 目标 active 且会话空闲时会自动续跑；中断等价于暂停。
 
+> 转录里的显示：目标转发与自动续跑在 TUI 里只显示**一行**摘要（`Goal request · …` / `Goal auto-continue · …`），完整的内部 prompt 只送给模型、不刷屏；命令回执（`pause`/`status`/`/goal-debug` 等）同样是一行通知。这些内容都会留在会话历史里（synthetic 消息）。
+
 ## 调试
 
 两个入口都是**只读**的，不改任何状态：

@@ -54,16 +54,18 @@ function memoryStorage(): StorageLike {
 
 function runner(deps: GoalDeps) {
   const prompts: string[] = []
+  const descriptions: string[] = []
   const notices: string[] = []
   const handler = createCommandHandler(deps, {
-    prompt: async (_sessionID, text) => {
-      prompts.push(text)
+    deliver: async (input) => {
+      prompts.push(input.text)
+      descriptions.push(input.description)
     },
     notify: async (_sessionID, text) => {
       notices.push(text)
     },
   })
-  return { handler, prompts, notices }
+  return { handler, prompts, descriptions, notices }
 }
 
 function makeHandler() {
@@ -81,10 +83,12 @@ function makeHandler() {
 
 describe("createCommandHandler", () => {
   test("objective text is forwarded to the model", async () => {
-    const { handler, prompts } = makeHandler()
+    const { handler, prompts, descriptions } = makeHandler()
     await handler({ sessionID: "ses_1", prompt: { text: "ship it" } })
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain("ship it")
+    // TUI 只显示 description 一行；整段 prompt 不该进转录。
+    expect(descriptions[0]).toBe("Goal request · ship it")
   })
 
   test("pause and resume are handled deterministically", async () => {

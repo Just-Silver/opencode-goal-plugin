@@ -23,6 +23,7 @@
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
 | 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
 | 11 | 命令回执**人看不到** | 命令没有返回通道；给人看必须传 `synthetic` 的 **`description`**（`text` 只给模型） |
+| 12 | 内部 prompt **刷屏转录** | 驱动模型要用 `synthetic`（`description` 一行 + `text` 完整 + `resume: true`），别用 `session.prompt`（会落成 User 消息整段显示） |
 
 ---
 
@@ -230,7 +231,37 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 
 ---
 
-## 7. 复核用命令速查
+## 7. 把内容送给模型，但不刷屏（synthetic 投递）
+
+**现象**：`/goal <目标>` 转发给模型的那种内部 prompt、以及每次自动续跑的 continuation prompt，会**整段**出现在 TUI 转录里，把会话刷屏。
+
+**根因（出处）**：
+- `ctx.session.prompt(...)` 落成 **User 消息**，TUI 逐字渲染整段。
+- `ctx.session.synthetic(...)` 落成 **Synthetic 消息**，TUI 的 `SessionNoticeMessageV2` 只渲染 `description`（见 §6）。
+- 但对模型来说两者等价（`packages/core/src/session/runner/to-llm-message.ts`）：
+  ```ts
+  case "synthetic":
+    return [Message.make({ id: message.id, role: "user", content: message.text })]
+  ```
+- HTTP 契约（`packages/protocol/src/groups/session.ts`）：*"Durably admit synthetic session input and **schedule execution unless resume is false**"*。
+
+**正确做法**：需要驱动模型行动的内部 prompt 用
+```ts
+await ctx.session.synthetic({
+  sessionID,
+  text: fullPrompt,                          // 模型收到的完整内容（等价一条 user 消息）
+  description: noticeLine("Goal auto-continue", objective),  // TUI 唯一显示的一行
+  resume: true,                              // 唤醒模型；纯提醒用 false，免得白跑一轮
+})
+```
+
+**这是宿主自己的用法**：`packages/core/src/session/subagent-completion.ts` 就用 `synthetic({ text, description, resume })` 把子代理结果投递给父会话 —— 既唤醒父会话，TUI 又只显示 `↳ Subagent finished · <description>`。
+
+**怎么验证**：设一个目标，TUI 里应只看到一行 `◈ Goal auto-continue · …`，而不是整段 `Continue working toward the active goal...`；`bun test` 里 `server.test.ts` 断言了目标投递 `resume === true` 且 `description === "Goal request · ship it"`。
+
+---
+
+## 8. 复核用命令速查
 
 ```powershell
 # 后台 service 端点与口令

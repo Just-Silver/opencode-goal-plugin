@@ -35,10 +35,18 @@ export default {
       },
     }
 
+    // 投递给模型的入口一律走 synthetic：TUI 只显示 `description` 一行（否则整段 prompt 会刷屏），
+    // `text` 仍是模型收到的完整内容（`to-llm-message` 里 synthetic → role "user"）。
+    const deliver = (input: { sessionID: string; text: string; description: string }) =>
+      ctx.session
+        .synthetic({ sessionID: input.sessionID, text: input.text, description: input.description, resume: true })
+        .then(() => undefined)
+    // 纯回执：不唤醒模型，`description` 就是给人看的那一行。
+    const notify = (sessionID: string, text: string) =>
+      ctx.session.synthetic({ sessionID, text, description: text, resume: false }).then(() => undefined)
+
     // 事件路由先建：命令/工具/调试视图都要引用它。
-    const continuation = createContinuation(deps, {
-      prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
-    })
+    const continuation = createContinuation(deps, { deliver })
     const router = createEventRouter(deps, continuation)
     const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
 
@@ -48,12 +56,7 @@ export default {
         name: options.commandName,
         description: "Set, inspect, pause, resume, or clear the persistent goal.",
         execute: async (input) => {
-          const handler = createCommandHandler(deps, {
-            prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
-            // TUI 只把 synthetic 的 description 渲染进转录；只给 text，用户会看到一行空白通知。
-            notify: (sessionID, text) =>
-              ctx.session.synthetic({ sessionID, text, description: text, resume: false }).then(() => undefined),
-          })
+          const handler = createCommandHandler(deps, { deliver, notify })
           await handler({ sessionID: input.sessionID, prompt: { text: input.prompt.text } })
         },
       })
@@ -62,8 +65,7 @@ export default {
         description: "Read-only diagnostics for the goal plugin (no model turn).",
         execute: async (input) => {
           const text = await debug.render(input.prompt.text, input.sessionID)
-          // description 才是 TUI 渲染的那份；text 只是模型上下文。
-          await ctx.session.synthetic({ sessionID: input.sessionID, text, description: text, resume: false })
+          await notify(input.sessionID, text)
         },
       })
     })

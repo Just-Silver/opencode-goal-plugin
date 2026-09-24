@@ -40,14 +40,17 @@ describe("createContinuation", () => {
   test("injects the continuation prompt for an active goal", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "finish X", now: 0 }))
-    const sent: string[] = []
+    const sent: Array<{ text: string; description: string }> = []
     const continuation = createContinuation(deps, {
-      prompt: async (_sessionID, text) => {
-        sent.push(text)
+      deliver: async (input) => {
+        sent.push({ text: input.text, description: input.description })
       },
     })
     expect(await continuation.onIdle("ses_1", "build")).toBe(true)
-    expect(sent[0]).toContain("finish X")
+    expect(sent[0]?.text).toContain("finish X")
+    // TUI 只渲染 description；它得能说明这一轮是什么，而不是整段 continuation prompt。
+    expect(sent[0]?.description).toContain("finish X")
+    expect(sent[0]?.description.length).toBeLessThan(120)
     expect((await deps.repo.load("ses_1"))?.lastContinuationAt).toBe(5000)
   })
 
@@ -55,7 +58,7 @@ describe("createContinuation", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), status: "paused" })
     const sent: string[] = []
-    const continuation = createContinuation(deps, { prompt: async () => void sent.push("x") })
+    const continuation = createContinuation(deps, { deliver: async () => void sent.push("x") })
     expect(await continuation.onIdle("ses_1", "build")).toBe(false)
     expect(sent).toHaveLength(0)
   })
@@ -64,7 +67,7 @@ describe("createContinuation", () => {
     const deps = makeDeps({ isRestricted: (agent) => agent === "plan" })
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const sent: string[] = []
-    const continuation = createContinuation(deps, { prompt: async () => void sent.push("x") })
+    const continuation = createContinuation(deps, { deliver: async () => void sent.push("x") })
     expect(await continuation.onIdle("ses_1", "plan")).toBe(false)
     expect(sent).toHaveLength(0)
   })

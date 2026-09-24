@@ -2,6 +2,7 @@ import { pause, resume } from "../model/goal"
 import type { Goal } from "../model/types"
 import { goalCommandPrompt } from "../prompts/index"
 import type { GoalDeps } from "./deps"
+import { noticeLine } from "./notice"
 
 export type GoalCommandKind = "pause" | "resume" | "clear" | "status" | "objective"
 
@@ -27,8 +28,8 @@ export function parseGoalCommand(text: string): ParsedGoalCommand {
 }
 
 export interface CommandPort {
-  /** 触发一次模型轮（用于转发目标文本）。 */
-  readonly prompt: (sessionID: string, text: string) => Promise<void>
+  /** 触发一次模型轮（转发目标文本）。走 synthetic，TUI 只显示 `description` 一行。 */
+  readonly deliver: (input: { sessionID: string; text: string; description: string }) => Promise<void>
   /** 不经模型地把消息显示给用户（pause/resume/clear/status 的回执）。 */
   readonly notify: (sessionID: string, text: string) => Promise<void>
 }
@@ -48,7 +49,11 @@ export function createCommandHandler(deps: GoalDeps, port: CommandPort): (input:
 
     switch (parsed.kind) {
       case "objective":
-        await port.prompt(sessionID, goalCommandPrompt(parsed.objective ?? ""))
+        await port.deliver({
+          sessionID,
+          text: goalCommandPrompt(parsed.objective ?? ""),
+          description: noticeLine("Goal request", parsed.objective ?? ""),
+        })
         return
       case "status":
         await port.notify(sessionID, existing ? statusLine(existing) : "No goal is set for this session.")

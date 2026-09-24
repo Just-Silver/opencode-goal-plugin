@@ -60,7 +60,6 @@ function mockCtx(get: () => Promise<unknown>) {
       hook: async (name: string) => {
         hooks.push(name)
       },
-      prompt: async () => ({}),
       synthetic: async (input: Record<string, unknown>) => {
         synthetic.push(input)
         return {}
@@ -131,6 +130,23 @@ describe("server", () => {
     expect(env.synthetic[0]?.resume).toBe(false)
     // TUI 只渲染 description；漏传会让命令回执变成空白通知行。
     expect(env.synthetic[0]?.description).toBe(env.synthetic[0]?.text)
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
+  test("an objective is delivered as a resuming synthetic so the prompt never floods the transcript", async () => {
+    const env = mockCtx(missing)
+    const cleanup = await plugin.setup(env.ctx as never)
+    const command = env.commands[0]
+
+    await command!.execute({ sessionID: "ses_1", prompt: { text: "ship it" } })
+
+    expect(env.synthetic).toHaveLength(1)
+    const notice = env.synthetic[0] as { text?: string; description?: string; resume?: boolean }
+    expect(notice.resume).toBe(true)
+    expect(notice.text).toContain("ship it")
+    // 完整 prompt 只给模型（text）；TUI 只显示 description 一行。
+    expect(notice.description).toBe("Goal request · ship it")
 
     if (typeof cleanup === "function") await cleanup()
   })

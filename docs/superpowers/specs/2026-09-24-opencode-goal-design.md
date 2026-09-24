@@ -65,7 +65,7 @@ src/
 - `/goal <text>`：**自适应**——模型先判断信息是否足够（可判定成功标准 / 验证方法 / 范围边界 / 停止条件）：够 → 自动结构化后 `create`；不够 → 访谈（一次一问、≤6 问），问全再 `create`。
 - `/goal`（无参）/ `status` / `show`：报告当前目标。
 - `/goal pause` / `resume` / `clear`：**在 `execute` 里确定性处理**（不经模型）。
-- 实现：`ctx.command.transform(e => e.add({ name, description, execute }))`；`execute({ sessionID, prompt, delivery })` 里判断子命令 → 服务端处理；否则 `ctx.session.prompt(...)` 转发给模型。
+- 实现：`ctx.command.transform(e => e.add({ name, description, execute }))`；`execute({ sessionID, prompt, delivery })` 里判断子命令 → 服务端处理；否则**用 `synthetic({ text: goalCommandPrompt(...), description: "Goal request · <objective>", resume: true })` 转发给模型**。**不用 `ctx.session.prompt`**：那条会落成 User 消息，整段 prompt 会直接刷满 TUI 转录（见 §8 投递方式）。
 - `/goal-debug env | events | sessions | state`：**确定性只读诊断**（本实例 location / 会话归属判定 / 最近事件环 / 全部 goal 记录 / 本会话轮状态），输出走 `synthetic(resume:false)`，不唤醒模型。与业务命令分开，避免调试标记污染正常面。
 
 ## 5. 工具面（单一 `goal` + op）
@@ -122,6 +122,8 @@ goal({
 - **轮边界/结果**：轮边界 = `session.execution.started → succeeded`；中断 = `session.execution.interrupted`（等价于 `Session.Message.Idle` 的 `outcome: interrupted`）→ **`paused`**（宿主给定，非启发式）。
 - **会话恢复**默认不自动续。
 - **续跑轮**：注入完整 continuation prompt（XML 转义 objective + 预算 + 完成审计 + blocked 门槛）。
+- **投递方式**：续跑轮与目标转发都用 `synthetic({ text, description, resume: true })` 而非 `ctx.session.prompt`。`text` 是模型收到的完整内容（`to-llm-message` 里 synthetic → `role: "user"`，与用户消息等价）；`description` 是 TUI 里**唯一显示**的一行摘要（如 `Goal auto-continue · <objective>`），这样整段内部 prompt 不会刷屏。宿主自身的 subagent 完成通知就是这个用法（`packages/core/src/session/subagent-completion.ts`）。只补充上下文、不需要模型行动的提醒用 `resume: false`。
+- **回执**：`pause`/`resume`/`clear`/`status` 与 `/goal-debug` 同样走 `synthetic(resume: false)`，且**必须传 `description`**（只给 `text` 时 TUI 那行是空的）。
 - **常态（普通轮）**：只注入**轻量**提醒（"有 active 目标 → 先 `get_goal`；仅 active 才继续"），**不塞 objective**。
 - **compaction**：`ctx.session.hook("compaction", ...)` 注入目标快照（objective/status/预算/checkpoint + "仅 active 才继续"），保证压缩后模型仍知情；压缩后靠常态提醒 + `get_goal` 恢复。
 - **超长目标（>4000）**：KV 存全文；续跑时只注入**前 `max_objective_chars` 字 + "（已截断，调 `goal({op:"get"})` 取完整目标）"**；完成审计强制 `get_goal` 复核。
@@ -202,3 +204,4 @@ TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`�
 - **2026-09-25（冒烟修复）**：轮边界由 `session.status`（`busy → idle`）改为 `session.execution.*`。`session.status` / `session.idle` 是 deprecated 定义，虽在客户端 `V2Event` union 里，但**后端从不 emit**（全仓库唯一引用是 `event-manifest.ts` 的注册），因此轮结算与空闲续跑**一次都没执行过**。真实轮边界：`session.execution.started → succeeded`（`failed` 只结算、不续跑），中断仍为 `session.execution.interrupted` → `paused`。教训：**类型在 union 里 ≠ 后端会 emit**；单测 mock 不能替代真实事件流核对。复盘见实现计划文档。
 - **2026-09-25（多实例修复）**：promise 版插件的 `ctx.event.subscribe()` 订阅的是**跨所有 location** 的全局事件流（OpenAPI：*"across all server locations"*），而宿主**为每个 location 各加载一份**本插件（官方文档：`ctx.location` 是本实例的 location，不是它收到的事件/会话的 location）⇒ 不处理则同一会话被处理 N 次（实测续跑每轮被注入 3 条）。修复：带 `location` 的事件直接与本实例 `ctx.location.directory` 比较；不带 `location` 的 `session.execution.*` 回落到 `ctx.session.get` 查询会话目录并按会话缓存（**不可**依赖「step.started 先到」的顺序，那会在重载后漏掉第一轮）。细节见 `docs/opencode/plugin-dev-gotchas.md`。
 - **2026-09-25（调试通道）**：新增 `/goal-debug` 命令 + 只读 `goal_debug` 工具（`debug`，**默认开**）+ `events.ts` 里最近 50 条事件的归属判定环。动机：此前排查只能临时改 `goal(op="get")` 的返回值打探针，污染正常工具、且每次都要改码重载。二者定位不同：**命令不注入模型上下文**（源码：`Command.Service` 只出现在 `session/command.ts` 执行、`plugin/host.ts` 插件 API、`plugin/internal.ts` 注册，`session/system-prompt.ts` 无命令清单），只有人/被告知的 agent 可见；**工具会注入**，故 agent 自主诊断必须走工具（description 明写 `DEBUG ONLY / Do not call during normal goal work`）。
+- **2026-09-25（投递与显示修复）**：两处问题一并修。①命令回执在 TUI 不可见：`CommandDefinition.execute` 返回 `void`（无返回通道），服务端插件也没有 toast（`ctx.event` 只有 `subscribe`），唯一出口是 `session.synthetic`，而 TUI 只渲染其 **`description`**（`text` 是给模型的）⇒ 只传 `text` 会变成一行空白通知；现所有回执补 `description`。②整段内部 prompt 刷屏：`/goal <目标>` 转发与每轮续跑原先用 `ctx.session.prompt`，会落成 **User 消息**整段显示（用户截图反馈）；现改走 `synthetic({ text, description, resume: true })`——`text` 仍是模型收到的完整内容（`to-llm-message` 里 synthetic → `role: "user"`），`description` 是 TUI 唯一显示的一行摘要（`Goal request · …` / `Goal auto-continue · …`）。宿主自己的 subagent 完成通知就是这么做的。细节见 gotchas §6/§7。
