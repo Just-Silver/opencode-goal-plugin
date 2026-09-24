@@ -1,15 +1,43 @@
 {
-  "name": "opencode-goal",
+  "name": "@justsilver/opencode-goal-plugin",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Codex/OMP-style persistent goals for OpenCode V2 (/goal command + goal tool + idle continuation)",
+  "description": "Codex/OMP-style persistent goals for OpenCode V2: /goal command + goal tool + idle auto-continuation + evidence-based completion + blocked/budget guards",
+  "license": "MIT",
+  "author": "Just-Silver",
+  "homepage": "https://github.com/Just-Silver/opencode-goal-plugin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Just-Silver/opencode-goal-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Just-Silver/opencode-goal-plugin/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "plugin",
+    "goal",
+    "goals",
+    "persistent-goals",
+    "agent",
+    "codex",
+    "ai"
+  ],
   "main": "./src/server.ts",
   "exports": {
     ".": "./src/server.ts",
     "./server": "./src/server.ts"
   },
-  "files": ["src"],
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "server.ts",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"

@@ -1,0 +1,75 @@
+name: Release
+
+# 发布只能由 tag 触发（workflow_dispatch 只做预检，不发布）。
+# 注意：Trusted Publisher 里配置的就是本文件名（release.yml），改名必须同步改 npm 侧配置。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# 发布不可并行：排队串行，不取消
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 创建 GitHub Release
+  id-token: write   # npm Trusted Publishing（OIDC）
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Test
+        run: bun test
+      - name: Type check
+        run: bunx tsc --noEmit
+      - name: Version consistency (tag == package.json == CHANGELOG)
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+        run: |
+          if [ -n "$TAG" ]; then
+            node scripts/changelog.mjs check --tag "$TAG"
+          else
+            node scripts/changelog.mjs check
+          fi
+      - name: Extract release notes from CHANGELOG
+        run: node scripts/changelog.mjs notes --out release-notes.md
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false   # 发布构建不使用依赖缓存（官方建议）
+      - name: Publish to npm (Trusted Publishing / OIDC)
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "::notice::workflow_dispatch = 预检，只跑 npm publish --dry-run（不发布）"
+            npm publish --dry-run
+            exit 0
+          fi
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "::notice::${name}@${version} 已存在于 registry → 跳过发布（人工首发或重跑 tag）"
+            exit 0
+          fi
+          npm publish
+      - name: Create or update GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file release-notes.md
+          else
+            gh release create "$tag" --title "$tag" --notes-file release-notes.md
+          fi

@@ -164,11 +164,11 @@ async function belongsToThisLocation(sessionID: string) {
 | 安装方式 | 解析 | 实测 `entrypoint` |
 | --- | --- | --- |
 | 本地目录 | `Host.resolve({ directory })` → `<dir>/server` → `<dir>/index`（`main` / `exports` **都不参与**） | `file:///<仓库绝对路径>/src/server.ts` |
-| npm / git 包 | 经包 `package.json` 的 `exports`（`"./server"` / `"."`） | `<cache>/npm/git-<owner>-<repo>-<hash>/<gen>/node_modules/opencode-goal/src/server.ts` |
+| npm / git 包 | 经包 `package.json` 的 `exports`（`"./server"` / `"."`） | `<cache>/npm/git-<repo>-<hash>/<gen>/node_modules/<包名>/src/server.ts`（作用域包再套一层：`node_modules/@scope/name/...`） |
 
 配套事实（均为真机实测）：
 
-- **git 安装按 `files` 过滤**：本仓库 `"files": ["src"]` ⇒ 缓存副本里只有 `src/` + `package.json` + `README.md` + `LICENSE`，**根目录的 `server.ts` 不在**。所以本地目录安装的入口（根 `server.ts`）不是"唯一入口"，改入口/加运行时文件时两条路径都要照顾（运行时文件必须放进 `src/`）。
+- **包安装按 `files` 过滤**：本仓库的 `"files"` 是白名单（`src/**/*.ts` + `!src/**/*.test.ts` + `server.ts` + `CHANGELOG.md`）⇒ 发布/缓存副本里**不含测试文件**，也**不含** `src/` 之外的运行时文件；注意**本地目录安装不经过这层过滤**。所以本地目录安装的入口（根 `server.ts`）不是"唯一入口"，改入口/加运行时文件时两条路径都要照顾（运行时文件必须放进 `src/`）。
 - `"private": true` **不影响** git 安装（只挡 `npm publish`）。
 - **同名 spec（含 ref）命中旧缓存**：代码改了也不会重拉 ⇒ 换 40 位 SHA 或清 `<cache>/npm/git-*`。
 - 判定当前加载来源就看日志：`msg="loading plugin" id=<spec> entrypoint=<file://…>`。

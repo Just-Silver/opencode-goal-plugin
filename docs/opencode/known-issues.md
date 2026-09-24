@@ -37,7 +37,7 @@
 
 1. **钉满 40 位 commit SHA**：上游明确 full commit hash 会跳过 update check → 完全不弹；代价是**没有自动更新**。本机全局配置就是这么装的。（**tag 是否同样跳过 —— 未验证**）
 2. 别删 `~/.cache/opencode/npm/**`（删了会强制重装 → 弹更多次）。
-3. 想「自动更新且不弹窗」：改用 **npm 包名**（走 registry HTTP，不 spawn git）；代价是要发到 npm（本插件目前不发）。
+3. 想「自动更新且不弹窗」：改用 **npm 包名**（走 registry HTTP，不 spawn git）——本插件已发布为 **`@justsilver/opencode-goal-plugin`**，npm 安装路径天然不弹，见 README 的安装一节。
 4. **发现式安装**（把插件目录放到 `~/.config/opencode/plugins/`）——本地开发时用的就是这条，无弹窗。
 
 **动作**：
