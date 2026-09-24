@@ -23,7 +23,7 @@
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
 | 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
 | 11 | 命令回执**人看不到** | 命令没有返回通道；给人看必须传 `synthetic` 的 **`description`**（`text` 只给模型） |
-| 12 | 内部 prompt **刷屏转录** | 驱动模型要用 `synthetic`（`description` 一行 + `text` 完整 + `resume: true`），别用 `session.prompt`（会落成 User 消息整段显示） |
+| 12 | 目标上下文**刷屏 + 历史膨胀** | 目标本体走 `hook("context")` 进 **system**（不落消息、不进转录）；驱动模型只发**一行**（`prompt` / `synthetic` 都能唤醒） |
 
 ---
 
@@ -231,33 +231,30 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 
 ---
 
-## 7. 把内容送给模型，但不刷屏（synthetic 投递）
+## 7. 目标上下文要进 **system**，不要进消息（否则刷屏 + 历史膨胀）
 
-**现象**：`/goal <目标>` 转发给模型的那种内部 prompt、以及每次自动续跑的 continuation prompt，会**整段**出现在 TUI 转录里，把会话刷屏。
+**现象**：`/goal <目标>` 的转发 prompt、以及每轮自动续跑的 continuation prompt（几千字符），会**整段**出现在 TUI 转录里，并且**每轮都往会话历史里堆一份**。
 
 **根因（出处）**：
 - `ctx.session.prompt(...)` 落成 **User 消息**，TUI 逐字渲染整段。
-- `ctx.session.synthetic(...)` 落成 **Synthetic 消息**，TUI 的 `SessionNoticeMessageV2` 只渲染 `description`（见 §6）。
-- 但对模型来说两者等价（`packages/core/src/session/runner/to-llm-message.ts`）：
-  ```ts
-  case "synthetic":
-    return [Message.make({ id: message.id, role: "user", content: message.text })]
-  ```
-- HTTP 契约（`packages/protocol/src/groups/session.ts`）：*"Durably admit synthetic session input and **schedule execution unless resume is false**"*。
+- 把大段 prompt 当消息发，等于**每轮持久化一次**；转录刷屏只是表象，真正的问题是上下文膨胀。
 
-**正确做法**：需要驱动模型行动的内部 prompt 用
-```ts
-await ctx.session.synthetic({
-  sessionID,
-  text: fullPrompt,                          // 模型收到的完整内容（等价一条 user 消息）
-  description: noticeLine("Goal auto-continue", objective),  // TUI 唯一显示的一行
-  resume: true,                              // 唤醒模型；纯提醒用 false，免得白跑一轮
-})
-```
+**正确做法（宿主生态里的 V2 版 `opencode2-goal-plugin` 就是这么写的）**：
+1. **目标上下文走 system**：`ctx.session.hook("context", e => e.system.push({ type: "text", text }))` —— system 部分只存在于**当次请求**，不落消息、不进转录、不堆积历史。
+   - 参考实现原文：`[Persisted goal]\nObjective: …\nStatus: …` 就是在这里注入的。
+2. **触发只发一行**：续跑用 `ctx.session.synthetic({ text: "Continue the active goal from its current state.", description: "Goal auto-continue · <objective>", resume: true })`。
+   - `text` 是给模型的行（`to-llm-message` 里 synthetic → `role: "user"`，见下）；`description` 是 TUI **唯一显示**的那行（`SessionNoticeMessageV2` 只渲染 `description`，见 §6）。
+   - 宿主的 HTTP 契约（`packages/protocol/src/groups/session.ts`）：*"Durably admit synthetic session input and **schedule execution unless resume is false**"* ⇒ `resume: true` 唤醒模型，纯回执用 `false`。
+   - **呈现方式二选一**（都不影响机制）：参考实现用 `ctx.session.prompt` → 显示为**普通用户消息**；用 `ctx.session.synthetic` → 显示为 `◈` **通知行**。两者都只落一行、都能唤醒模型。宿主自身偏向：`subagent-completion.ts`（通知）用 synthetic；要模型**行动**的续跑，参考实现用 prompt。
+   ```ts
+   case "synthetic":  // packages/core/src/session/runner/to-llm-message.ts
+     return [Message.make({ id: message.id, role: "user", content: message.text })]
+   ```
+3. 同一套思路宿主自己也在用：`packages/core/src/session/subagent-completion.ts` 用 `synthetic({ text, description, resume })` 通知父会话（TUI 只显示 `↳ Subagent finished · <description>`）。
 
-**这是宿主自己的用法**：`packages/core/src/session/subagent-completion.ts` 就用 `synthetic({ text, description, resume })` 把子代理结果投递给父会话 —— 既唤醒父会话，TUI 又只显示 `↳ Subagent finished · <description>`。
+**实测（本仓库冒烟）**：改前每轮把 ~3000 字符的 continuation prompt 写进历史；改后每轮只落 **48 字符**触发语，目标本体在 system 里。模型仍能跨 5 轮把「1~50 分批」数完并 `complete` —— 触发语里**没有**目标，这本身就证明 system 注入生效。
 
-**怎么验证**：设一个目标，TUI 里应只看到一行 `◈ Goal auto-continue · …`，而不是整段 `Continue working toward the active goal...`；`bun test` 里 `server.test.ts` 断言了目标投递 `resume === true` 且 `description === "Goal request · ship it"`。
+**怎么验证**：设一个目标后导出会话（`opencode session export <sid>`），检查 `synthetic` 消息的 `text` 长度：续跑应恒为几十字符；目标只出现在你自己的 system 注入里。`bun test` 里 `prompts/index.test.ts` 断言 `continuationTrigger()` 是**单行**，`host/hooks.test.ts` 断言 context 钩子带上了 objective。
 
 ---
 

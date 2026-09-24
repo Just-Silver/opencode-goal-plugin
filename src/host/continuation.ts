@@ -1,11 +1,14 @@
-import { continuationPrompt } from "../prompts/index"
+import { continuationTrigger } from "../prompts/index"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
 
 export interface ContinuationPort {
   /**
    * 投递一轮续跑。走 `session.synthetic`（`resume: true` 唤醒模型）而非 `session.prompt`：
-   * synthetic 在 TUI 里只显示 `description` 一行，整段 continuation prompt 不会刷屏。
+   * synthetic 在 TUI 里只显示 `description` 一行。
+   *
+   * 关键：`text` **只发一行触发语** —— 目标本体与规则由 `ctx.session.hook("context")`
+   * 以 system 部分注入（不落消息），所以每轮不会把整段目标上下文写进会话历史。
    */
   readonly deliver: (input: { sessionID: string; text: string; description: string }) => Promise<void>
 }
@@ -23,7 +26,7 @@ export function createContinuation(deps: GoalDeps, port: ContinuationPort): Cont
       if (deps.isRestricted(agentId)) return false
       await port.deliver({
         sessionID,
-        text: continuationPrompt(goal, { maxObjectiveChars: deps.options.maxObjectiveChars }),
+        text: continuationTrigger(),
         description: noticeLine("Goal auto-continue", goal.objective),
       })
       const now = deps.now()

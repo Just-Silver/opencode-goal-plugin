@@ -47,8 +47,10 @@ describe("createContinuation", () => {
       },
     })
     expect(await continuation.onIdle("ses_1", "build")).toBe(true)
-    expect(sent[0]?.text).toContain("finish X")
-    // TUI 只渲染 description；它得能说明这一轮是什么，而不是整段 continuation prompt。
+    // 触发只有一行：目标本体由 context 钩子注入 system，不进消息历史。
+    expect(sent[0]?.text.split("\n")).toHaveLength(1)
+    expect(sent[0]?.text).not.toContain("finish X")
+    // TUI 只渲染 description；它得能说明这一轮是什么。
     expect(sent[0]?.description).toContain("finish X")
     expect(sent[0]?.description.length).toBeLessThan(120)
     expect((await deps.repo.load("ses_1"))?.lastContinuationAt).toBe(5000)

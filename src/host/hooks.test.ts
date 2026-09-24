@@ -36,14 +36,16 @@ function makeDeps(): GoalDeps {
 }
 
 describe("createContextHook", () => {
-  test("appends a light reminder only while the goal is active", async () => {
+  test("injects the persisted goal context (objective included) only while the goal is active", async () => {
     const deps = makeDeps()
-    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "keep me", now: 0 }))
     const hook = createContextHook(deps)
     const active = { sessionID: "ses_1", agent: "build", system: [] as { type: "text"; text: string }[] }
     await hook(active)
     expect(active.system).toHaveLength(1)
-    expect(active.system[0]?.text).toContain('op "get"')
+    // 目标本体走 system（不落消息、不进转录），所以 objective 必须在这里带上。
+    expect(active.system[0]?.text).toContain("[Persisted goal]")
+    expect(active.system[0]?.text).toContain("keep me")
 
     await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), status: "paused" })
     const paused = { sessionID: "ses_1", agent: "build", system: [] as { type: "text"; text: string }[] }
