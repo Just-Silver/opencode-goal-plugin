@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Codex/OMP-style persistent goals for OpenCode V2 (/goal command + goal tool + idle continuation)",
+  "main": "./src/server.ts",
   "exports": {
     ".": "./src/server.ts",
     "./server": "./src/server.ts"

@@ -9,12 +9,38 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 ```jsonc
 {
   "plugins": [
-    { "package": "file:E:/Code/Projects/Agent/opencode-goal", "options": {} }
+    { "package": "github:Just-Silver/opencode-goal#<ref>", "options": {} }
   ]
 }
 ```
 
-（发布到 npm 后改成 `"opencode-goal"`；options 见下。）
+`<ref>` 可为分支、tag 或 commit SHA。**推荐 pin 到 40 位 commit SHA**：宿主把 commit 视为不可变目标（不反复检查更新），分支/tag 视为可变目标（会定期查新）。
+
+`package` 支持所有 `npm-package-arg` 认可的 git 形态：
+
+- `github:Just-Silver/opencode-goal#<ref>`
+- `git+https://github.com/Just-Silver/opencode-goal.git#<ref>`
+- `git+ssh://git@github.com/Just-Silver/opencode-goal.git#<ref>`
+
+宿主会把包安装到 opencode 缓存目录（`<global cache>/npm/<key>/<generation>/node_modules/opencode-goal`），再经该包 `package.json` 的 `exports` 解析 `server` 入口。
+
+### 本地目录安装（开发用）
+
+```jsonc
+{
+  "plugins": [
+    { "package": "E:/Code/Projects/Agent/opencode-goal", "options": {} }
+  ]
+}
+```
+
+要点：
+
+- **本地插件必须指向"目录"**，不能指向文件——宿主会对文件路径打印 `configured plugin path must be a directory` 并把该项**丢弃**。
+- 该目录需有宿主可解析的入口：本仓库已提供 `"main": "./src/server.ts"`（Bun 的**目录**解析认 `main`/`index`，`exports` 不参与目录解析）。
+- 也可写成 `"file:///E:/Code/Projects/Agent/opencode-goal"`（等价）；以 `./` `../` 开头的相对路径相对**配置文件所在目录**解析。
+
+`options` 见下。
 
 ## 配置项（`options`）
 
