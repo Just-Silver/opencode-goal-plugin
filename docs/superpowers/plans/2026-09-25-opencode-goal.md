@@ -3090,7 +3090,7 @@ git add src/host/events.ts src/host/events.test.ts src/server.ts src/server.test
 git commit -m "feat: 事件接线与插件组装（命令/工具/钩子/续跑/reconcile）"
 ```
 
-> **实现偏差记录（执行期修订，2026-09-25）**：本任务的参考代码在执行时经评审修订过一次——轮状态改为**按 `sessionID` 分键**（`trackers`/`stepStartedAt` 为 Map），并新增 per-session `turnOpen`，`session.status` **只按轮的开合边沿**动作（重复 `busy`、`busy→retry→busy` 不重启轮；未开轮的 `idle` 不结算、不续跑）；事件循环改为**逐事件** try/catch（单事件失败记日志后继续）；`execution.interrupted` / `session.deleted` 清理全部 per-session 结构；`create` 分支加 `isRestricted` 守卫。`createEventRouter` 签名由 `(deps, tracker, continuation)` 变为 **`(deps, continuation)`**。以 `src/host/events.ts`、`src/server.ts` 的实际代码为准（提交 `bd46c78`）。
+> **实现偏差记录（执行期修订，2026-09-25）**：本任务的参考代码在执行时经评审修订过两次。第一次（`bd46c78`）：轮状态改为**按 `sessionID` 分键**（`trackers`/`stepStartedAt` 为 Map），并新增 per-session `turnOpen`，`session.status` **只按轮的开合边沿**动作（重复 `busy`、`busy→retry→busy` 不重启轮；未开轮的 `idle` 不结算、不续跑）；事件循环改为**逐事件** try/catch（单事件失败记日志后继续）；`execution.interrupted` / `session.deleted` 清理全部 per-session 结构；`create` 分支加 `isRestricted` 守卫；`createEventRouter` 签名由 `(deps, tracker, continuation)` 变为 **`(deps, continuation)`**。第二次（终审修复波 `d58eeb5`）：`notify` 改走 `ctx.session.synthetic({ ..., resume: false })`（**必须**——否则 `/goal` 的确定性子命令会唤醒一次模型轮）；续跑 agent 同时采信 `session.created` / `session.step.started`，**agent 未知则跳过续跑**（不再兜底 `"build"`）；`GoalError` 改显式字段赋值（可擦除语法，兼容 Node strip-only）；删除死状态 `lastStatus`；`resume` 补清 `blockerText`。以 `src/` 实际代码为准（提交 `d58eeb5`）。
 
 ---
 
