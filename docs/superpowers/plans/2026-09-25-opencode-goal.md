@@ -1139,8 +1139,10 @@ function memoryStorage(): StorageLike & { map: Map<string, unknown> } {
     async scan({ prefix, after, limit = 100 }) {
       const keys = [...map.keys()].filter((key) => key.startsWith(prefix)).sort()
       const start = after === undefined ? 0 : keys.findIndex((key) => key > after)
-      const slice = keys.slice(start < 0 ? keys.length : start, (start < 0 ? keys.length : start) + limit)
-      const next = keys[(start < 0 ? keys.length : start) + limit]
+      const from = start < 0 ? keys.length : start
+      const slice = keys.slice(from, from + limit)
+      // 宿主契约（packages/core/src/kv.ts#scan）：after 为排他游标；next = 本页最后一个 key，仅当还有更多时返回。
+      const next = keys.length > from + limit ? slice[slice.length - 1] : undefined
       return { entries: slice.map((key) => ({ key, value: map.get(key) })), ...(next ? { next } : {}) }
     },
   }
