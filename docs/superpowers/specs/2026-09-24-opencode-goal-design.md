@@ -1,7 +1,7 @@
 # opencode-goal 插件设计（v1）
 
 - 日期：2026-09-24
-- 状态：待评审
+- 状态：已定稿（自审通过，2026-09-24）
 - 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.x`；本机参考 `E:\Code\Projects\Agent\Externals\opencode`）
 - 参考：Codex `ext/goal`、OMP `packages/coding-agent/src/goals`（见 `docs/codex/`、`docs/omp/`）
 
@@ -20,7 +20,7 @@
   （包名 `@you/opencode-goal` 为示例，发布前定名。）
   - 字符串形式 `"@you/opencode-goal"` 亦可用，options 取默认。
   - 源码依据：`packages/core/src/config/plugin/source.ts#parse`（`{ target: input.package, options: input.options ?? {} }`）。
-- 包形态（`package.json`）：`type: module`；`exports: { "./server": "./src/server.ts" }`；`files: ["src"]`；`name` 与插件 `id` 对应。
+- 包形态（`package.json`）：`type: module`；导出 server 入口（`exports: { "./server": "./src/server.ts" }`，或包根导出）；`files: ["src"]`；`name` 与插件 `id` 对应。宿主按 `server` → 包根 的顺序解析（`packages/plugin/src/host.ts#resolve`）。
 - 插件入口：`define({ id, setup })`（`@opencode/plugin/promise`）。
 
 ## 3. 架构与模块（分层 + 功能目录）
@@ -42,7 +42,7 @@ src/
     repository.ts  get/set/remove/scan（JSON + version 迁移）
     reconcile.ts   启动兜底（scan + ctx.session.get + guard）
   host/            opencode 适配 + 编排
-    events.ts      事件归并成本轮事实（session.next.* / session.deleted）
+    events.ts      事件归并成本轮事实（session.status / Idle 标记 / session.next.* / session.deleted）
     context.ts     session context 钩子：常态轻量提醒 / 续跑注入
     compaction.ts  compaction 钩子：注入目标快照
     plan.ts        agent 检测（受限 agent 拦截）
@@ -117,12 +117,13 @@ goal({
 
 ## 8. 续跑与上下文注入
 
-- **触发**：目标 active 且会话**空闲**（轮末才续，**不打断**）。
-- **中断**（Esc）→ `paused`；**会话恢复**默认不自动续。
+- **触发**：目标 active 且会话空闲（`session.status = idle`）；轮末才续，**不打断**。
+- **轮边界/结果**：`Session.Message.Idle{ outcome: succeeded|failed|interrupted }` 标记轮边界（两个 Idle 标记之间的 step 属同一轮）；**`interrupted` → `paused`**（宿主给定，非启发式）。
+- **会话恢复**默认不自动续。
 - **续跑轮**：注入完整 continuation prompt（XML 转义 objective + 预算 + 完成审计 + blocked 门槛）。
 - **常态（普通轮）**：只注入**轻量**提醒（"有 active 目标 → 先 `get_goal`；仅 active 才继续"），**不塞 objective**。
 - **compaction**：`ctx.session.hook("compaction", ...)` 注入目标快照（objective/status/预算/checkpoint + "仅 active 才继续"），保证压缩后模型仍知情；压缩后靠常态提醒 + `get_goal` 恢复。
-- **超长目标（>4000）**：KV 存全文；续跑注入摘要 + "调 `goal({op:"get"})` 取完整目标"；完成审计强制 `get_goal` 复核。
+- **超长目标（>4000）**：KV 存全文；续跑时只注入**前 `max_objective_chars` 字 + "（已截断，调 `goal({op:"get"})` 取完整目标）"**；完成审计强制 `get_goal` 复核。
 
 ## 9. 宿主信号 → 状态（阶段二）
 
@@ -140,7 +141,7 @@ goal({
 
 - **存储**：官方 **`ctx.storage`**（持久 KV，SQLite 后端，按插件 ID 命名空间隔离）。
 - **每会话一条记录**：key `goal:<sessionID>`，value 为 JSON：
-  - `version`、`goalId`、`objective`（**含 >4000 全文**）、`objectiveDigest?`、`status`、`tokenBudget`、`tokensUsed`、`timeUsedSeconds`、`blockerKey`、`blockerStreak`、`autoTurns`、`lastContinuationAt`、`updatedAt`。
+  - `version`、`goalId`、`objective`（**含 >4000 全文**）、`status`、`tokenBudget`、`tokensUsed`、`timeUsedSeconds`、`blockerKey`、`blockerStreak`、`autoTurns`、`lastContinuationAt`、`updatedAt`。
   - "会话文件 + 目标引用文件"合并为同一条。
 - **清理**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal clear` 同。`complete/paused/blocked/budget-limited` 保留。
 - **启动 reconcile**：`storage.scan({prefix:"goal:"})` 得本地 ID；用 `ctx.session.get(id)` 判活；不存在且 `updatedAt` 超 `reconcile_guard_minutes`（默认 5）→ remove。查不到/出错一律跳过、不删。只启动跑一次。
