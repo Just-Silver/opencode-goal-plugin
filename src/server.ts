@@ -77,6 +77,9 @@ export default {
         name: tool.name,
         description: tool.description,
         input: tool.input,
+        // 直连工具而非 Code Mode 目录：宿主所有内置工具、以及参考实现的 goal 工具都这么设。
+        // 否则模型必须写 JS（execute → tools.goal(...)）才能调用，多一层间接又更容易出错。
+        options: { codemode: false },
         execute: async (input, context) => tool.execute(input, context),
       })
       if (options.debug) {
@@ -96,6 +99,7 @@ export default {
             required: ["op"],
             additionalProperties: false,
           },
+          options: { codemode: false },
           execute: async (input, context) => ({
             content: await debug.render(String((input as { op?: unknown })?.op ?? ""), context.sessionID),
           }),

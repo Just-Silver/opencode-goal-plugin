@@ -18,7 +18,7 @@ function mockCtx(get: () => Promise<unknown>) {
   const store = new Map<string, unknown>()
   const removed: string[] = []
   const commands: Array<{ name: string; execute: (input: { sessionID: string; prompt: { text: string } }) => Promise<void> }> = []
-  const tools: Array<{ name: string }> = []
+  const tools: Array<{ name: string; options?: { codemode?: boolean } }> = []
   const hooks: string[] = []
   const synthetic: Array<Record<string, unknown>> = []
   const storage = {
@@ -52,7 +52,9 @@ function mockCtx(get: () => Promise<unknown>) {
       },
     },
     tool: {
-      transform: async (cb: (editor: { add: (tool: { name: string }) => void }) => void) => {
+      transform: async (
+        cb: (editor: { add: (tool: { name: string; options?: { codemode?: boolean } }) => void }) => void,
+      ) => {
         cb({ add: (tool) => tools.push(tool) })
       },
     },
@@ -94,8 +96,11 @@ describe("server", () => {
     const cleanup = await plugin.setup(env.ctx as never)
     expect(env.commands[0]?.name).toBe("goal")
     expect(env.tools[0]?.name).toBe("goal")
+    // 直连工具：不进 Code Mode 目录（否则模型要写 JS 才能调）。
+    expect(env.tools[0]?.options?.codemode).toBe(false)
     // debug 默认开：额外注册只读的 goal_debug，让 agent 能自主诊断。
     expect(env.tools[1]?.name).toBe("goal_debug")
+    expect(env.tools[1]?.options?.codemode).toBe(false)
     expect(env.hooks).toEqual(["context", "compaction"])
 
     await new Promise((resolve) => setTimeout(resolve, 20))
