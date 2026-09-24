@@ -96,11 +96,14 @@ README.md             安装与使用
   "private": true,
   "type": "module",
   "description": "Codex/OMP-style persistent goals for OpenCode V2 (/goal command + goal tool + idle continuation)",
+  "main": "./src/server.ts",
   "exports": { ".": "./src/server.ts", "./server": "./src/server.ts" },
   "files": ["src"],
   "scripts": { "test": "bun test", "typecheck": "tsc --noEmit" }
 }
 ```
+
+> **执行期修订（2026-09-25，真机安装验证）**：`Host.resolve({directory})` 解析**本地插件目录**时走 **Bun 的目录解析**（认 `main`/`index`），**`exports` 不参与**——只有 `exports` 时解析失败、插件被**静默丢弃**（`entrypoints.server` 为空 → `scan()` 直接 `return []`），故补 `"main": "./src/server.ts"`。而 **git/npm 安装**路径相反：宿主用「包名 + `exports` 子路径」（`opencode-goal/server`）解析，`main` 不参与。两条路径均已实测通过（本地目录 / `git+file://…#<sha>` 安装 + 复刻 `Host.resolve` 三步）。另外：配置安装的**本地目标必须是目录**，指向文件会被打印 `configured plugin path must be a directory` 并丢弃。
 
 - [ ] **Step 2: 创建 `tsconfig.json`**
 
