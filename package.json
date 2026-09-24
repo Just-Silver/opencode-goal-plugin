@@ -1,0 +1,23 @@
+{
+  "name": "opencode-goal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex/OMP-style persistent goals for OpenCode V2 (/goal command + goal tool + idle continuation)",
+  "main": "./src/server.ts",
+  "exports": {
+    ".": "./src/server.ts",
+    "./server": "./src/server.ts"
+  },
+  "files": ["src"],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.0.16",
+    "@types/bun": "^1.4.2",
+    "effect": "^3.22.2",
+    "typescript": "^7.0.2"
+  }
+}

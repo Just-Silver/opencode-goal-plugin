@@ -96,11 +96,14 @@ README.md             安装与使用
   "private": true,
   "type": "module",
   "description": "Codex/OMP-style persistent goals for OpenCode V2 (/goal command + goal tool + idle continuation)",
+  "main": "./src/server.ts",
   "exports": { ".": "./src/server.ts", "./server": "./src/server.ts" },
   "files": ["src"],
   "scripts": { "test": "bun test", "typecheck": "tsc --noEmit" }
 }
 ```
+
+> **执行期修订（2026-09-25，真机安装验证）**：`Host.resolve({directory})` 解析**本地插件目录**时走 **Bun 的目录解析**（认 `main`/`index`），**`exports` 不参与**——只有 `exports` 时解析失败、插件被**静默丢弃**（`entrypoints.server` 为空 → `scan()` 直接 `return []`），故补 `"main": "./src/server.ts"`。而 **git/npm 安装**路径相反：宿主用「包名 + `exports` 子路径」（`opencode-goal/server`）解析，`main` 不参与。两条路径均已实测通过（本地目录 / `git+file://…#<sha>` 安装 + 复刻 `Host.resolve` 三步）。另外：配置安装的**本地目标必须是目录**，指向文件会被打印 `configured plugin path must be a directory` 并丢弃。
 
 - [ ] **Step 2: 创建 `tsconfig.json`**
 
@@ -608,6 +611,8 @@ export function applyBlocker(
   threshold: number,
   now: number,
 ): { goal: Goal; blocked: boolean } {
+  // 仅对 active 目标计数（与 applyTurn 对称）：非 active 原样返回，不增长 streak、不改状态
+  if (goal.status !== "active") return { goal, blocked: false }
   const key = normalizeBlockerKey(report.key)
   const streak = goal.blockerKey === key ? goal.blockerStreak + 1 : 1
   const blocked = streak >= threshold
@@ -866,9 +871,9 @@ Expected: FAIL
 ```ts
 import type { Goal } from "./types"
 
-/** 预算命中 → budget-limited。仅从 active 触发；优先级高于 blocked（系统事实压过模型主观）。 */
+/** 预算命中 → budget-limited。可从 active 或 blocked 升级；优先级高于 blocked（系统事实压过模型主观）。 */
 export function applyBudget(goal: Goal, now: number): Goal {
-  if (goal.status !== "active") return goal
+  if (goal.status !== "active" && goal.status !== "blocked") return goal
   if (goal.tokenBudget === undefined) return goal
   if (goal.tokensUsed < goal.tokenBudget) return goal
   return { ...goal, status: "budget-limited", updatedAt: now }
@@ -1139,8 +1144,10 @@ function memoryStorage(): StorageLike & { map: Map<string, unknown> } {
     async scan({ prefix, after, limit = 100 }) {
       const keys = [...map.keys()].filter((key) => key.startsWith(prefix)).sort()
       const start = after === undefined ? 0 : keys.findIndex((key) => key > after)
-      const slice = keys.slice(start < 0 ? keys.length : start, (start < 0 ? keys.length : start) + limit)
-      const next = keys[(start < 0 ? keys.length : start) + limit]
+      const from = start < 0 ? keys.length : start
+      const slice = keys.slice(from, from + limit)
+      // 宿主契约（packages/core/src/kv.ts#scan）：after 为排他游标；next = 本页最后一个 key，仅当还有更多时返回。
+      const next = keys.length > from + limit ? slice[slice.length - 1] : undefined
       return { entries: slice.map((key) => ({ key, value: map.get(key) })), ...(next ? { next } : {}) }
     },
   }
@@ -2844,7 +2851,7 @@ export function createEventRouter(deps: GoalDeps, tracker: TurnTracker, continua
               const result = applyTurn(goal, facts, deps.options.emptyThreshold, now)
               blocked = result.blocked
               // spec §7：某轮未报 block → streak 归零
-              return resetBlockerStreak(result.goal, reportedBlocker)
+              return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
             })
             if (blocked) return
             const goal = await deps.repo.load(sessionID)
@@ -3085,6 +3092,8 @@ Expected: 全绿
 git add src/host/events.ts src/host/events.test.ts src/server.ts src/server.test.ts
 git commit -m "feat: 事件接线与插件组装（命令/工具/钩子/续跑/reconcile）"
 ```
+
+> **实现偏差记录（执行期修订，2026-09-25）**：本任务的参考代码在执行时经评审修订过两次。第一次（`bd46c78`）：轮状态改为**按 `sessionID` 分键**（`trackers`/`stepStartedAt` 为 Map），并新增 per-session `turnOpen`，`session.status` **只按轮的开合边沿**动作（重复 `busy`、`busy→retry→busy` 不重启轮；未开轮的 `idle` 不结算、不续跑）；事件循环改为**逐事件** try/catch（单事件失败记日志后继续）；`execution.interrupted` / `session.deleted` 清理全部 per-session 结构；`create` 分支加 `isRestricted` 守卫；`createEventRouter` 签名由 `(deps, tracker, continuation)` 变为 **`(deps, continuation)`**。第二次（终审修复波 `d58eeb5`）：`notify` 改走 `ctx.session.synthetic({ ..., resume: false })`（**必须**——否则 `/goal` 的确定性子命令会唤醒一次模型轮）；续跑 agent 同时采信 `session.created` / `session.step.started`，**agent 未知则跳过续跑**（不再兜底 `"build"`）；`GoalError` 改显式字段赋值（可擦除语法，兼容 Node strip-only）；删除死状态 `lastStatus`；`resume` 补清 `blockerText`。以 `src/` 实际代码为准（提交 `d58eeb5`）。
 
 ---
 

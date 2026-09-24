@@ -1,0 +1,81 @@
+# opencode-goal
+
+Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `goal` 工具 + 空闲续跑 + 证据式完成 + blocked/预算护栏。
+
+## 安装（配置安装）
+
+在 `opencode.json(c)` 加入：
+
+```jsonc
+{
+  "plugins": [
+    { "package": "github:Just-Silver/opencode-goal#<ref>", "options": {} }
+  ]
+}
+```
+
+`<ref>` 可为分支、tag 或 commit SHA。**推荐 pin 到 40 位 commit SHA**：宿主把 commit 视为不可变目标（不反复检查更新），分支/tag 视为可变目标（会定期查新）。
+
+`package` 支持所有 `npm-package-arg` 认可的 git 形态：
+
+- `github:Just-Silver/opencode-goal#<ref>`
+- `git+https://github.com/Just-Silver/opencode-goal.git#<ref>`
+- `git+ssh://git@github.com/Just-Silver/opencode-goal.git#<ref>`
+
+宿主会把包安装到 opencode 缓存目录（`<global cache>/npm/<key>/<generation>/node_modules/opencode-goal`），再经该包 `package.json` 的 `exports` 解析 `server` 入口。
+
+### 本地目录安装（开发用）
+
+```jsonc
+{
+  "plugins": [
+    { "package": "E:/Code/Projects/Agent/opencode-goal", "options": {} }
+  ]
+}
+```
+
+要点：
+
+- **本地插件必须指向"目录"**，不能指向文件——宿主会对文件路径打印 `configured plugin path must be a directory` 并把该项**丢弃**。
+- 该目录需有宿主可解析的入口：本仓库已提供 `"main": "./src/server.ts"`（Bun 的**目录**解析认 `main`/`index`，`exports` 不参与目录解析）。
+- 也可写成 `"file:///E:/Code/Projects/Agent/opencode-goal"`（等价）；以 `./` `../` 开头的相对路径相对**配置文件所在目录**解析。
+
+`options` 见下。
+
+## 配置项（`options`）
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `token_budget` | 无 | 新目标默认 token 预算 |
+| `max_goal_token_budget` | 无 | 允许的最大预算 |
+| `max_objective_chars` | 4000 | 目标注入截断阈值（全文始终存 KV） |
+| `blocked_threshold` | 3 | blocker 连续轮阈值 |
+| `empty_threshold` | 3 | 空转连续轮阈值 |
+| `reconcile_guard_minutes` | 5 | 启动兜底保护窗 |
+| `restricted_agents` | `["plan"]` | 受限 agent（拒创建/续跑/resume） |
+| `command_name` | `goal` | 主命令名 |
+
+## 用法
+
+- `/goal <目标>`：自适应——够具体则自动结构化并 `create`；否则先追问再 `create`。
+- `/goal`、`/goal status`：报告当前目标。
+- `/goal pause` / `/goal resume` / `/goal clear`：服务端确定性处理（不消耗 token）。
+- 目标 active 且会话空闲时会自动续跑；中断等价于暂停。
+
+## 开发
+
+```bash
+bun install
+bun test
+bunx tsc --noEmit
+```
+
+## 真机 smoke（手动清单）
+
+> 以下为**手动清单**，需要在具备 OpenCode V2 运行时与确定性模型的机器上人工执行；本仓库的开发/CI 环境不实际执行。
+
+1. 用上面的 `plugins` 配置启动 OpenCode V2。
+2. `/goal 在仓库根目录创建一个 hello.txt，内容为 hello，然后用 ls 验证文件存在`。
+3. 观察：模型结构化 → 调 `goal(op="create")` → 完成后调 `goal(op="complete")` → 目标状态变 `complete`。
+4. `/goal status` 应报告状态；`/goal clear` 后 KV 记录消失（可再用一次 `/goal status` 确认 “No goal”）。
+5. 制造一次空转（如 `/goal` 一个当前无法推进的目标），确认连续 3 个自动续跑轮后状态变 `blocked`，且工具返回带收尾指令。
