@@ -30,8 +30,15 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
   const stepStartedAt = new Map<string, number>()
   const trackers = new Map<string, TurnTracker>()
   const turnOpen = new Set<string>()
-  /** 已确认属于本 location 的会话（见 handle 的归属判定）。 */
-  const ownSessions = new Set<string>()
+  /** 事件不带 location 时的归属回落：会话所在目录缓存（每会话一次查询）。 */
+  const sessionLocations = new Map<string, string | null>()
+  const belongsToThisLocation = async (sessionID: string): Promise<boolean> => {
+    const cached = sessionLocations.get(sessionID)
+    if (cached !== undefined) return cached === deps.locationDirectory
+    const directory = await deps.sessionDirectory(sessionID)
+    sessionLocations.set(sessionID, directory ?? null)
+    return directory === deps.locationDirectory
+  }
 
   // 轮状态按会话分键：避免 A 的 automatic 事实被 B 的 idle 结算。
   const tracker = (sessionID: string): TurnTracker => {
@@ -57,17 +64,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
       if (!sessionID) return
 
       // 归属判定：promise 版插件的 ctx.event.subscribe() 订阅的是**跨所有 location** 的全局事件流
-      // （/api/event），而宿主为**每个 location 各加载一份**本插件。若不按 location 过滤，同一会话会被
-      // 多个实例重复处理（续跑被注入 N 次）。带 location 的事件据此判定；不带 location 的事件
-      // （如 session.execution.*）只认已登记的会话——同轮 session.step.started 总在轮末之前到达并登记。
+      // （/api/event），而宿主为**每个 location 各加载一份**本插件（官方文档：ctx.location 是本实例的
+      // location，不是它收到的事件/会话的 location）。带 location 的事件直接比较；不带 location 的
+      // 事件（session.execution.*）回落到查询会话所在目录，按会话缓存。
       const directory = event.location?.directory
       if (typeof directory === "string") {
-        if (directory !== deps.locationDirectory) {
-          ownSessions.delete(sessionID)
-          return
-        }
-        ownSessions.add(sessionID)
-      } else if (!ownSessions.has(sessionID)) {
+        if (directory !== deps.locationDirectory) return
+      } else if (!(await belongsToThisLocation(sessionID))) {
         return
       }
 
@@ -177,6 +180,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           stepStartedAt.delete(sessionID)
           trackers.delete(sessionID)
           turnOpen.delete(sessionID)
+          sessionLocations.delete(sessionID)
           return
         }
       }

@@ -34,6 +34,7 @@ function makeDeps(): GoalDeps {
     newGoalId: () => "g1",
     isRestricted: () => false,
     locationDirectory: OWN,
+    sessionDirectory: async () => OWN,
   }
 }
 
@@ -374,25 +375,40 @@ describe("createEventRouter", () => {
     expect(injected).toBe(0)
   })
 
-  test("a session admitted by a located event settles from an unlocated execution end", async () => {
+  test("an unlocated execution end is admitted via the session's directory", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = makeRouter(deps, {
+    const router = createEventRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
       },
     })
-    // 未登记前，不带 location 的 execution 事件无法确认归属 → 忽略
+    // 不带 location 的事件回落到查询会话目录（本 location）→ 放行；但 agent 未知 → 不续跑
     await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
     await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
     expect(injected).toBe(0)
-    // 本 location 的 step.started 到达后完成登记，之后轮次正常结算并续跑
+    // agent 已知后再次成轮 → 正常结算并续跑
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
-    await router.handle({ type: "session.step.started", data: { sessionID: "ses_1", agent: "build", started: 0 } })
     await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
     await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
     expect(injected).toBe(1)
+  })
+
+  test("unlocated events for another location's session are ignored", async () => {
+    const deps = { ...makeDeps(), sessionDirectory: async () => "other-location" }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    let injected = 0
+    const router = createEventRouter(deps, {
+      onIdle: async () => {
+        injected += 1
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+    await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
+    expect(injected).toBe(0)
   })
 })

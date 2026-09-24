@@ -24,6 +24,14 @@ export default {
       newGoalId: () => crypto.randomUUID(),
       isRestricted: (agentId) => isRestrictedAgent(agentId, options.restrictedAgents),
       locationDirectory: ctx.location.directory,
+      sessionDirectory: async (sessionID) => {
+        try {
+          const session = await ctx.session.get({ sessionID })
+          return session.location?.directory
+        } catch {
+          return undefined
+        }
+      },
     }
 
     // 命令：保留名服务端确定性处理；其余转发给模型。

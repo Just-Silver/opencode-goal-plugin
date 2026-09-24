@@ -197,3 +197,4 @@ TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`�
 ## 17. 修订记录
 
 - **2026-09-25（冒烟修复）**：轮边界由 `session.status`（`busy → idle`）改为 `session.execution.*`。`session.status` / `session.idle` 是 deprecated 定义，虽在客户端 `V2Event` union 里，但**后端从不 emit**（全仓库唯一引用是 `event-manifest.ts` 的注册），因此轮结算与空闲续跑**一次都没执行过**。真实轮边界：`session.execution.started → succeeded`（`failed` 只结算、不续跑），中断仍为 `session.execution.interrupted` → `paused`。教训：**类型在 union 里 ≠ 后端会 emit**；单测 mock 不能替代真实事件流核对。复盘见实现计划文档。
+- **2026-09-25（多实例修复）**：promise 版插件的 `ctx.event.subscribe()` 订阅的是**跨所有 location** 的全局事件流（OpenAPI：*"across all server locations"*），而宿主**为每个 location 各加载一份**本插件（官方文档：`ctx.location` 是本实例的 location，不是它收到的事件/会话的 location）⇒ 不处理则同一会话被处理 N 次（实测续跑每轮被注入 3 条）。修复：带 `location` 的事件直接与本实例 `ctx.location.directory` 比较；不带 `location` 的 `session.execution.*` 回落到 `ctx.session.get` 查询会话目录并按会话缓存（**不可**依赖「step.started 先到」的顺序，那会在重载后漏掉第一轮）。细节见 `docs/opencode/plugin-dev-gotchas.md`。

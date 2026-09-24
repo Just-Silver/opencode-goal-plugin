@@ -32,6 +32,7 @@ function makeDeps(overrides: Partial<GoalDeps> = {}): GoalDeps {
     newGoalId: () => `g${++id}`,
     isRestricted: () => false,
     locationDirectory: "test-location",
+    sessionDirectory: async () => "test-location",
     ...overrides,
   }
 }

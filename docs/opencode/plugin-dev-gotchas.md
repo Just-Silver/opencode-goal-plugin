@@ -14,13 +14,14 @@
 | --- | --- | --- |
 | 1 | `session.status` / `session.idle` **后端不 emit** | 轮边界要用 `session.execution.*`；类型在 union 里 ≠ 会发出 |
 | 2 | `/api/event` 是**跨所有 location** 的全局流 | 每个 location 一份插件实例，同一会话会被处理 N 次，**必须按 `event.location` 过滤** |
-| 3 | `session.execution.*` **不带 `location`** | 归属要用带 location 的事件（如 `session.step.started`）先登记 |
+| 3 | `session.execution.*` **不带 `location`** | 归属回落到 `ctx.session.get({sessionID})` 查会话目录并缓存（**别**靠「等 step.started 登记」，有顺序 bug） |
 | 4 | 目录插件入口 | `<dir>/server.ts` 或 `<dir>/index.ts`；`main`/`exports` 都不参与 |
 | 5 | 插件目标必须是**目录** | 指向文件会被 `configured plugin path must be a directory` 丢弃 |
 | 6 | `opencode plugin list` 不可作加载判据 | 它读后台 service 缓存，也不枚举配置插件 |
 | 7 | `Bun.resolveSync` 缓存负面结果 | 同进程内「先探测失败 → 再建文件」仍失败 |
 | 8 | `ctx.session.synthetic` 必须 `resume: false` | 否则确定性子命令会白唤醒一轮模型 |
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
+| 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
 
 ---
 
@@ -92,23 +93,44 @@ Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -P
 
 **结论**：N 个 location ⇒ N 个插件实例**都**会收到同一会话的事件 ⇒ 不处理就 N 倍执行（我们实测**每轮注入 3 条** continuation，消息 `id` 各不相同、time 差 1–2ms）。
 
-### 2.3 正确做法：按事件顶层 `location.directory` 过滤
+### 2.3 正确做法：带 location 的直接比，缺失时回落查会话
 
 ```ts
-// 带 location 的事件：只认本 location，并登记该会话
+// 带 location 的事件：直接与本实例 location 比较
 const directory = event.location?.directory
 if (typeof directory === "string") {
-  if (directory !== deps.locationDirectory) { ownSessions.delete(sessionID); return }
-  ownSessions.add(sessionID)
-} else if (!ownSessions.has(sessionID)) {
-  return   // 不带 location 的事件（execution.*）必须已登记过才处理
+  if (directory !== deps.locationDirectory) return
+} else if (!(await belongsToThisLocation(sessionID))) {
+  return   // 不带 location 的事件（session.execution.*）回落到查询会话目录
+}
+
+// 按会话缓存的一次查询：ctx.session.get → Session.Info.location.directory
+const sessionLocations = new Map<string, string | null>()
+async function belongsToThisLocation(sessionID: string) {
+  const cached = sessionLocations.get(sessionID)
+  if (cached !== undefined) return cached === deps.locationDirectory
+  const dir = await sessionDirectory(sessionID)   // 查询失败/未知 → undefined
+  sessionLocations.set(sessionID, dir ?? null)
+  return dir === deps.locationDirectory
 }
 ```
-- 关键点：**同轮的 `session.step.started`（带 location）总在 `session.execution.succeeded`（不带 location）之前到达**，所以轮末结算天然可用。
-- 完全没有 step 的轮（无模型调用）本来也不该续跑，被忽略是安全的。
-- `ctx.location.directory` 取自 `ctx.location`（`Location.Info`，Promise/Effect 都有）。
 
-**怎么验证**：改完后发一条消息，真实流里 `session.execution.started` 数 = 轮数；会话里**每轮只有 1 条** continuation。
+> ⚠️ **别用「等 `session.step.started` 来登记会话」的做法**（我们踩过这个顺序 bug）：`session.execution.started` **先于** `session.step.started` 到达，所以每到插件重载后的**第一轮**，`started` 都会因「归属未知」被跳过 → `turnOpen` 为空 → 轮末 `succeeded` 直接 return ⇒ **那一轮不结算、不续跑**（现象：重启后第一次设目标不续跑，之后才恢复）。用 `ctx.session.get` 回落没有这个顺序依赖。
+
+- `ctx.location.directory`（`Location.Info`）与 `Session.Info.location.directory`（`Location.PublicRef`）都是绝对目录，Promise/Effect 都可用。
+- 查询失败或会话不存在 → 视为「不属于本 location」，保守跳过。
+
+**怎么验证**：发一条消息，真实流里 `session.execution.started` 数 = 轮数；会话里**每轮只有 1 条** continuation（不是 N 条）。
+
+### 2.4 怎么确认「插件加载的是最新代码」
+
+改完 `src/**` 后**不要假设**已重载。最快探针：临时在 `goal(op="get")` 的返回（或一条全局 storage key）里塞标记，调用一次看标记在不在；在 ⇒ 最新代码在跑。
+
+实测的配套事实：
+- 本地插件改文件会触发重载；日志里 `msg="loading plugin"` 每次重载出现 **N 条**（N = location 数）。
+- 「看到 loading 日志」**不足以**证明加载成功——loading 在**加载开始**时打印，失败发生在其后，会额外记 `WARN failed to load plugin`。
+- 插件的 `console.log` / `console.error` **不会**进 `opencode.log`；要观察内部状态就用 storage/工具返回值做探针。
+- 验证多个实例：把本实例 `ctx.location.directory` 写进全局 storage（key 带 location 去重），再用 `goal(op="get")` 读出来 —— 实测本机 3 个实例：`C:\Users\13178`、`D:\下载\Goal冒烟`、`E:\Code\Projects\Agent\opencode-goal`。
 
 ---
 
