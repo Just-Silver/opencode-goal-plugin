@@ -3236,7 +3236,7 @@ git commit -m "docs: README（安装/配置/用法/开发）"
 
 **教训**：当初「已核对 v2 客户端类型」只确认了 `session.status` 在 `V2Event` union 里存在 —— **类型在 union 里 ≠ 后端会 emit**。单测用 mock 事件自证会掩盖这类契约错配，必须用真实事件流核对。
 
-**追加（同一次冒烟发现的第二个问题）**：续跑恢复后每轮被注入 **3 条** continuation（消息 id 各不相同、时间差 1–2ms）。根因：promise 版 `ctx.event.subscribe()` 订阅的是**跨所有 location** 的全局事件流，而宿主**每个 location 各一份**插件实例（临时探针实测 3 个：`C:\Users\13178`、`D:\下载\Goal冒烟`、`E:\...\opencode-goal`），同一会话被 3 个实例各注入一次。修复：按事件顶层 `location.directory` 过滤；`session.execution.*` 不带 location，回落到 `ctx.session.get({sessionID})` 查会话目录并按会话缓存。第一版用「等 `session.step.started` 登记会话」，因 `execution.started` 先到而漏掉重载后第一轮 → 改为 `session.get` 回落。过程与可复用结论见 `docs/opencode/plugin-dev-gotchas.md`。
+**追加（同一次冒烟发现的第二个问题）**：续跑恢复后每轮被注入 **3 条** continuation（消息 id 各不相同、时间差 1–2ms）。根因：promise 版 `ctx.event.subscribe()` 订阅的是**跨所有 location** 的全局事件流，而宿主**每个 location 各一份**插件实例（临时探针实测 3 个 location 实例），同一会话被 3 个实例各注入一次。修复：按事件顶层 `location.directory` 过滤；`session.execution.*` 不带 location，回落到 `ctx.session.get({sessionID})` 查会话目录并按会话缓存。第一版用「等 `session.step.started` 登记会话」，因 `execution.started` 先到而漏掉重载后第一轮 → 改为 `session.get` 回落。过程与可复用结论见 `docs/opencode/plugin-dev-gotchas.md`。
 
 ## Execution Handoff
 

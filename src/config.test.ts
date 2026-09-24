@@ -21,4 +21,17 @@ describe("resolveOptions", () => {
   test("rejects a malformed restricted_agents", () => {
     expect(() => resolveOptions({ restricted_agents: "plan" })).toThrow(/restricted_agents/)
   })
+
+  test("debug defaults on and can be turned off", () => {
+    expect(DEFAULT_OPTIONS.debug).toBe(true)
+    expect(DEFAULT_OPTIONS.debugCommandName).toBe("goal-debug")
+    expect(resolveOptions({ debug: false, debug_command_name: "gdebug" })).toMatchObject({
+      debug: false,
+      debugCommandName: "gdebug",
+    })
+  })
+
+  test("rejects a non-boolean debug", () => {
+    expect(() => resolveOptions({ debug: "yes" })).toThrow(/debug/)
+  })
 })

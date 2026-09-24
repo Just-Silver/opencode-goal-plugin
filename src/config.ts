@@ -7,6 +7,9 @@ export interface Options {
   readonly reconcileGuardMinutes: number
   readonly restrictedAgents: readonly string[]
   readonly commandName: string
+  readonly debugCommandName: string
+  /** true 时额外注册 `goal_debug` 只读调试工具（默认开，便于 agent 自主诊断；设 false 可让工具表保持干净）。 */
+  readonly debug: boolean
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -16,6 +19,8 @@ export const DEFAULT_OPTIONS: Options = {
   reconcileGuardMinutes: 5,
   restrictedAgents: ["plan"],
   commandName: "goal",
+  debugCommandName: "goal-debug",
+  debug: true,
 }
 
 export function resolveOptions(raw: Record<string, unknown>): Options {
@@ -29,7 +34,15 @@ export function resolveOptions(raw: Record<string, unknown>): Options {
       positiveInt(raw.reconcile_guard_minutes, "reconcile_guard_minutes") ?? DEFAULT_OPTIONS.reconcileGuardMinutes,
     restrictedAgents: stringArray(raw.restricted_agents, "restricted_agents") ?? DEFAULT_OPTIONS.restrictedAgents,
     commandName: nonEmptyString(raw.command_name, "command_name") ?? DEFAULT_OPTIONS.commandName,
+    debugCommandName: nonEmptyString(raw.debug_command_name, "debug_command_name") ?? DEFAULT_OPTIONS.debugCommandName,
+    debug: booleanValue(raw.debug, "debug") ?? DEFAULT_OPTIONS.debug,
   }
+}
+
+function booleanValue(value: unknown, key: string): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "boolean") throw new Error(`opencode-goal: option "${key}" must be a boolean`)
+  return value
 }
 
 function positiveInt(value: unknown, key: string): number | undefined {

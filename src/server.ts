@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode/plugin"
 import { resolveOptions } from "./config"
 import { createCommandHandler } from "./host/commands"
 import { createContinuation } from "./host/continuation"
+import { createDebug } from "./host/debug"
 import type { GoalDeps } from "./host/deps"
 import { createEventRouter, type EventLike } from "./host/events"
 import { createCompactionHook, createContextHook } from "./host/hooks"
@@ -34,7 +35,14 @@ export default {
       },
     }
 
-    // 命令：保留名服务端确定性处理；其余转发给模型。
+    // 事件路由先建：命令/工具/调试视图都要引用它。
+    const continuation = createContinuation(deps, {
+      prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
+    })
+    const router = createEventRouter(deps, continuation)
+    const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
+
+    // 命令：保留名服务端确定性处理；其余转发给模型。调试命令只读、零 token、不走模型。
     ctx.command.transform((editor) => {
       editor.add({
         name: options.commandName,
@@ -42,14 +50,25 @@ export default {
         execute: async (input) => {
           const handler = createCommandHandler(deps, {
             prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
-            notify: (sessionID, text) => ctx.session.synthetic({ sessionID, text, resume: false }).then(() => undefined),
+            // TUI 只把 synthetic 的 description 渲染进转录；只给 text，用户会看到一行空白通知。
+            notify: (sessionID, text) =>
+              ctx.session.synthetic({ sessionID, text, description: text, resume: false }).then(() => undefined),
           })
           await handler({ sessionID: input.sessionID, prompt: { text: input.prompt.text } })
         },
       })
+      editor.add({
+        name: options.debugCommandName,
+        description: "Read-only diagnostics for the goal plugin (no model turn).",
+        execute: async (input) => {
+          const text = await debug.render(input.prompt.text, input.sessionID)
+          // description 才是 TUI 渲染的那份；text 只是模型上下文。
+          await ctx.session.synthetic({ sessionID: input.sessionID, text, description: text, resume: false })
+        },
+      })
     })
 
-    // 工具：goal(op=...)
+    // 工具：goal(op=...)（业务）；debug=true 时额外注册只读的 goal_debug（默认关，避免污染模型工具表）
     ctx.tool.transform((editor) => {
       const tool = createGoalTool(deps)
       editor.add({
@@ -58,6 +77,28 @@ export default {
         input: tool.input,
         execute: async (input, context) => tool.execute(input, context),
       })
+      if (options.debug) {
+        editor.add({
+          name: "goal_debug",
+          description:
+            "DEBUG ONLY — read-only diagnostics for the opencode-goal plugin (which location owns this session, recent event-ownership decisions, stored goals, in-memory turn state). Do NOT call this during normal goal work. Call it only when the user explicitly asks to debug the goal plugin, or when goal auto-continuation misbehaves.",
+          input: {
+            type: "object",
+            properties: {
+              op: {
+                type: "string",
+                description: "Which diagnostic to render (debug-only; never call speculatively).",
+                enum: ["env", "events", "sessions", "state"],
+              },
+            },
+            required: ["op"],
+            additionalProperties: false,
+          },
+          execute: async (input, context) => ({
+            content: await debug.render(String((input as { op?: unknown })?.op ?? ""), context.sessionID),
+          }),
+        })
+      }
     })
 
     // 钩子：常态轻量提醒 + 压缩快照
@@ -66,10 +107,6 @@ export default {
 
     // 事件：记账、轮边界、空闲续跑、会话删除
     const abort = new AbortController()
-    const continuation = createContinuation(deps, {
-      prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
-    })
-    const router = createEventRouter(deps, continuation)
     void (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: abort.signal })) {

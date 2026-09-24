@@ -55,6 +55,8 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 | `reconcile_guard_minutes` | 5 | 启动兜底保护窗 |
 | `restricted_agents` | `["plan"]` | 受限 agent（拒创建/续跑/resume） |
 | `command_name` | `goal` | 主命令名 |
+| `debug_command_name` | `goal-debug` | 调试命令名（只读、零 token） |
+| `debug` | `true` | 注册只读调试工具 `goal_debug`（设 `false` 可让模型工具表保持干净） |
 
 ## 用法
 
@@ -62,6 +64,18 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 - `/goal`、`/goal status`：报告当前目标。
 - `/goal pause` / `/goal resume` / `/goal clear`：服务端确定性处理（不消耗 token）。
 - 目标 active 且会话空闲时会自动续跑；中断等价于暂停。
+
+## 调试
+
+两个入口都是**只读**的，不改任何状态：
+
+- **人**：`/goal-debug env | events | sessions | state` —— 确定性、零 token，**不注入模型上下文**。
+  - `env`：本实例的 location、目标会话所在目录、归属判定、生效的 `options`
+  - `events`：最近 50 条事件 + 归属判定（`allow` / `drop-other-location` / `drop-unknown-session`）
+  - `sessions`：已存储的全部 goal 记录；`state`：本会话内存轮状态
+- **agent**：工具 `goal_debug(op=...)`（默认注册；description 明写 `DEBUG ONLY`，正常目标工作不要调用）。不想要它出现在模型工具表里就设 `debug: false`。
+
+排查「没续跑 / 重复续跑」时先看 `events` 的 `decision` 列；确认插件是否加载了最新代码看 `env` 里的 `options`。
 
 ## 开发
 

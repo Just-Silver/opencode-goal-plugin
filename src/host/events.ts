@@ -15,13 +15,58 @@ export interface EventLike {
   readonly location?: { readonly directory?: unknown }
 }
 
+/** 调试用：单条事件的归属判定结果（`/goal-debug events`）。 */
+export interface DebugEventRecord {
+  readonly at: number
+  readonly type: string
+  readonly sessionID?: string
+  readonly hasLocation: boolean
+  readonly location?: string
+  readonly decision: "allow" | "drop-other-location" | "drop-unknown-session" | "no-session"
+}
+
+/** 调试用：某会话的轮状态快照（`/goal-debug state`）。 */
+export interface DebugSessionState {
+  readonly sessionID: string
+  readonly turnOpen: boolean
+  readonly agent?: string
+  readonly sessionDirectory: string | null | undefined
+  readonly pendingAutomatic: boolean
+  readonly blockedThisTurn: boolean
+}
+
+export interface DebugSnapshot {
+  readonly events: readonly DebugEventRecord[]
+  readonly sessions: readonly DebugSessionState[]
+}
+
 export interface EventRouter {
   handle(event: EventLike): Promise<void>
+  /** 只读诊断视图，供调试命令/工具使用；不参与任何业务判定。 */
+  diagnostics(): DebugSnapshot
 }
 
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
+
+/** 事件环只记这些类型，避免被 delta 类高频事件刷屏。 */
+const TRACKED_TYPES = new Set([
+  "session.created",
+  "session.agent.selected",
+  "session.status",
+  "session.step.started",
+  "session.step.ended",
+  "session.text.ended",
+  "session.reasoning.ended",
+  "session.tool.called",
+  "session.execution.started",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.deleted",
+])
+const DEBUG_EVENT_LIMIT = 50
 
 export function createEventRouter(deps: GoalDeps, continuation: Continuation): EventRouter {
   const agents = new Map<string, string>()
@@ -38,6 +83,26 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     const directory = await deps.sessionDirectory(sessionID)
     sessionLocations.set(sessionID, directory ?? null)
     return directory === deps.locationDirectory
+  }
+
+  // 只读诊断环：记录最近若干条「关心的事件 + 归属判定结果」。
+  const debugEvents: DebugEventRecord[] = []
+  const note = (
+    event: EventLike,
+    sessionID: string | undefined,
+    decision: DebugEventRecord["decision"],
+    location?: string,
+  ): void => {
+    if (!TRACKED_TYPES.has(event.type)) return
+    debugEvents.push({
+      at: deps.now(),
+      type: event.type,
+      ...(sessionID === undefined ? {} : { sessionID }),
+      hasLocation: location !== undefined,
+      ...(location === undefined ? {} : { location }),
+      decision,
+    })
+    if (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.splice(0, debugEvents.length - DEBUG_EVENT_LIMIT)
   }
 
   // 轮状态按会话分键：避免 A 的 automatic 事实被 B 的 idle 结算。
@@ -61,18 +126,27 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     async handle(event) {
       const data = event.data ?? {}
       const sessionID = typeof data.sessionID === "string" ? data.sessionID : undefined
-      if (!sessionID) return
+      if (!sessionID) {
+        note(event, undefined, "no-session")
+        return
+      }
 
       // 归属判定：promise 版插件的 ctx.event.subscribe() 订阅的是**跨所有 location** 的全局事件流
       // （/api/event），而宿主为**每个 location 各加载一份**本插件（官方文档：ctx.location 是本实例的
       // location，不是它收到的事件/会话的 location）。带 location 的事件直接比较；不带 location 的
       // 事件（session.execution.*）回落到查询会话所在目录，按会话缓存。
       const directory = event.location?.directory
-      if (typeof directory === "string") {
-        if (directory !== deps.locationDirectory) return
+      const located = typeof directory === "string" ? directory : undefined
+      if (located !== undefined) {
+        if (located !== deps.locationDirectory) {
+          note(event, sessionID, "drop-other-location", located)
+          return
+        }
       } else if (!(await belongsToThisLocation(sessionID))) {
+        note(event, sessionID, "drop-unknown-session")
         return
       }
+      note(event, sessionID, "allow", located)
 
       switch (event.type) {
         case "session.agent.selected": {
@@ -183,6 +257,21 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           sessionLocations.delete(sessionID)
           return
         }
+      }
+    },
+
+    diagnostics() {
+      const ids = new Set<string>([...agents.keys(), ...sessionLocations.keys(), ...trackers.keys(), ...turnOpen])
+      return {
+        events: [...debugEvents],
+        sessions: [...ids].map((sessionID) => ({
+          sessionID,
+          turnOpen: turnOpen.has(sessionID),
+          ...(agents.has(sessionID) ? { agent: agents.get(sessionID) } : {}),
+          sessionDirectory: sessionLocations.get(sessionID),
+          pendingAutomatic: pendingAutomatic.has(sessionID),
+          blockedThisTurn: blockedThisTurn.get(sessionID) === true,
+        })),
       }
     },
   }

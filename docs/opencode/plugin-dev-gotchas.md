@@ -22,6 +22,7 @@
 | 8 | `ctx.session.synthetic` 必须 `resume: false` | 否则确定性子命令会白唤醒一轮模型 |
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
 | 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
+| 11 | 命令回执**人看不到** | 命令没有返回通道；给人看必须传 `synthetic` 的 **`description`**（`text` 只给模型） |
 
 ---
 
@@ -122,15 +123,20 @@ async function belongsToThisLocation(sessionID: string) {
 
 **怎么验证**：发一条消息，真实流里 `session.execution.started` 数 = 轮数；会话里**每轮只有 1 条** continuation（不是 N 条）。
 
-### 2.4 怎么确认「插件加载的是最新代码」
+### 2.4 怎么确认「插件加载的是最新代码」+ 专用调试通道
 
-改完 `src/**` 后**不要假设**已重载。最快探针：临时在 `goal(op="get")` 的返回（或一条全局 storage key）里塞标记，调用一次看标记在不在；在 ⇒ 最新代码在跑。
+改完 `src/**` 后**不要假设**已重载。**现在有专用入口，不用再改业务工具打探针**：
+
+- `/goal-debug env`（人敲）或 `goal_debug(op="env")`（agent 调）：打印**本实例 location、目标会话所在目录、归属判定、以及生效的 `options`** —— 新加的选项出现在输出里，就说明最新代码在跑。
+- `/goal-debug events`：最近 50 条「关心的事件 + 归属判定」，排查「没续跑 / 重复注入」直接看 `decision` 列。
 
 实测的配套事实：
 - 本地插件改文件会触发重载；日志里 `msg="loading plugin"` 每次重载出现 **N 条**（N = location 数）。
 - 「看到 loading 日志」**不足以**证明加载成功——loading 在**加载开始**时打印，失败发生在其后，会额外记 `WARN failed to load plugin`。
-- 插件的 `console.log` / `console.error` **不会**进 `opencode.log`；要观察内部状态就用 storage/工具返回值做探针。
-- 验证多个实例：把本实例 `ctx.location.directory` 写进全局 storage（key 带 location 去重），再用 `goal(op="get")` 读出来 —— 实测本机 3 个实例：`C:\Users\13178`、`D:\下载\Goal冒烟`、`E:\Code\Projects\Agent\opencode-goal`。
+- 插件的 `console.log` / `console.error` **不会**进 `opencode.log`；要观察内部状态就用 `/goal-debug`（或写一条全局 storage key）。
+- **命令不注入模型上下文**（源码证据：`Command.Service` 只在 `session/command.ts`（执行）、`plugin/host.ts`（插件 API）、`plugin/internal.ts`（注册）出现，`session/system-prompt.ts` 里没有任何命令清单）；**工具会注入**（name + description + input schema 都进模型上下文）。所以「给 agent 自主诊断」的入口只能是工具，「给人随手查」的入口用命令最干净。
+- 验证多个实例：`/goal-debug env` 看本实例 location；跨实例集合可用全局 storage 临时登记（实测本机同时加载 **3 个** location 实例。具体目录属机器相关，仓库内不记录）。
+- 命令/工具的输出**必须传 `synthetic` 的 `description`** 人才看得见（只给 `text` 会变成一行空白通知），见 §6。
 
 ---
 
@@ -198,7 +204,33 @@ async function belongsToThisLocation(sessionID: string) {
 
 ---
 
-## 6. 复核用命令速查
+## 6. 命令 / 工具的输出怎么"显示给人"
+
+**现象**：`/goal-debug env` 执行了，会话里也确实多了一条消息，但用户在 TUI 里**什么都看不到**（业务命令 `/goal status`、`/goal pause` 的回执同样不可见）。
+
+**根因（出处）**：
+- `CommandDefinition.execute` 返回 `Promise<void>`（`packages/plugin/src/promise/command.ts`；宿主侧 `packages/core/src/command.ts` 的 `Definition.execute` 返回 `Effect.Effect<void, unknown>`）——**命令没有"返回值"通道**，不能像 CLI 那样 `return "文本"` 让前端打印。
+- 服务端插件**没有 toast / 通知 API**：`ctx.event` 只有 `subscribe`（`packages/plugin/src/promise/event.ts`），没有 publish；`ctx.ui.toast` 只属于 **TUI 插件**（`packages/plugin/src/tui/context.ts`），服务端插件拿不到。
+- 唯一出口是 `ctx.session.synthetic(...)`，而 **TUI 只渲染 synthetic 的 `description`**。`packages/tui/src/routes/session/index.tsx` 的 `SessionNoticeMessageV2`：
+  ```ts
+  if (props.message.type === "synthetic") return props.message.description ?? ""
+  ```
+  schema 注释也写着 `description` 是 "A short human-readable summary for transcript display"（`packages/schema/src/session-message.ts`）。
+- 即：**`text` 是给模型的**（会以 `[Synthetic context]` 进上下文），**`description` 才是给人看的**。
+
+**正确做法**：给人看的回执**两个都传**：
+```ts
+await ctx.session.synthetic({ sessionID, text, description: text, resume: false })
+```
+`InlineToolLabel` 带 `flexWrap="wrap"`（`packages/tui/src/routes/session/message-parts.tsx`），所以 notice 行会**换行**显示长文本；Markdown 表格不渲染，是等宽纯文本（调试够用）。
+
+**没有"只给人看、不进模型"的出口**：synthetic 的 `text` 会留在模型上下文里（下一轮以 `[Synthetic context]` 出现）。介意污染就改用**工具**——工具结果由 agent 转述，且只在被调用时产生。
+
+**怎么验证**：TUI 里敲 `/goal-debug env`，应出现 `◈` 开头、可换行的诊断文本；`bun test` 里 `server.test.ts` 断言了 `synthetic[0].description === synthetic[0].text`。
+
+---
+
+## 7. 复核用命令速查
 
 ```powershell
 # 后台 service 端点与口令

@@ -95,6 +95,8 @@ describe("server", () => {
     const cleanup = await plugin.setup(env.ctx as never)
     expect(env.commands[0]?.name).toBe("goal")
     expect(env.tools[0]?.name).toBe("goal")
+    // debug 默认开：额外注册只读的 goal_debug，让 agent 能自主诊断。
+    expect(env.tools[1]?.name).toBe("goal_debug")
     expect(env.hooks).toEqual(["context", "compaction"])
 
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -127,6 +129,25 @@ describe("server", () => {
     expect(env.synthetic).toHaveLength(1)
     expect(env.synthetic[0]).toMatchObject({ sessionID: "ses_1", resume: false })
     expect(env.synthetic[0]?.resume).toBe(false)
+    // TUI 只渲染 description；漏传会让命令回执变成空白通知行。
+    expect(env.synthetic[0]?.description).toBe(env.synthetic[0]?.text)
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
+  test("the debug command reports its rendered output to the transcript", async () => {
+    const env = mockCtx(missing)
+    const cleanup = await plugin.setup(env.ctx as never)
+    const command = env.commands[1]
+    expect(command?.name).toBe("goal-debug")
+
+    await command!.execute({ sessionID: "ses_1", prompt: { text: "env" } })
+
+    expect(env.synthetic).toHaveLength(1)
+    const notice = env.synthetic[0] as { text?: string; description?: string; resume?: boolean }
+    expect(notice.resume).toBe(false)
+    expect(notice.text).toContain("debug env")
+    expect(notice.description).toBe(notice.text)
 
     if (typeof cleanup === "function") await cleanup()
   })
