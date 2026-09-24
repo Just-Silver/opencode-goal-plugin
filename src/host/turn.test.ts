@@ -29,4 +29,13 @@ describe("createTurnTracker", () => {
     tracker.start(true)
     expect(tracker.finish()).toEqual({ automatic: true, hasActivity: false })
   })
+
+  test("finish resets the tracker even without a following start", () => {
+    const tracker = createTurnTracker()
+    tracker.start(true)
+    tracker.markActivity()
+    expect(tracker.finish()).toEqual({ automatic: true, hasActivity: true })
+    // 关键：没有 start，直接再 finish
+    expect(tracker.finish()).toEqual({ automatic: false, hasActivity: false })
+  })
 })
