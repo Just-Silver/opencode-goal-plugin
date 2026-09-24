@@ -41,6 +41,13 @@ describe("applyBlocker", () => {
     expect(current.blockerStreak).toBe(1)
     expect(current.blockerKey).toBe("b")
   })
+
+  test("normalizes the report key before comparing streaks", () => {
+    const first = applyBlocker(goal, { key: " No API-Key！ ", text: "t" }, 3, 10).goal
+    const second = applyBlocker(first, { key: "no-api-key", text: "t" }, 3, 20).goal
+    expect(second.blockerStreak).toBe(2)
+    expect(second.blockerKey).toBe("no-api-key")
+  })
 })
 
 describe("resetBlockerStreak", () => {

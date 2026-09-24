@@ -5,8 +5,8 @@ const MAX_KEY = 64
 /** 归一化：trim → NFKC → 小写 → 非 [a-z0-9] 折叠为 '-' → 去首尾 '-' → 截断。不做语义匹配。 */
 export function normalizeBlockerKey(raw: string): string {
   const normalized = raw
-    .normalize("NFKC")
     .trim()
+    .normalize("NFKC")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
