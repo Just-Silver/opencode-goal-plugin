@@ -122,6 +122,20 @@ describe("server", () => {
     if (typeof cleanup === "function") await cleanup()
   })
 
+  test("reconciles away a record whose key is not a real session id", async () => {
+    // 探针留下的脏键：宿主 API 会对这种 id 报 400。旧规则把非 404 都当“会话还在”，
+    // 于是这类记录永远清不掉；现在按 id 形态直接判定为不存在。
+    const env = mockCtx(errored)
+    env.store.set("goal:__diag__/C__Users_13178", ORPHAN)
+
+    const cleanup = await plugin.setup(env.ctx as never)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(env.removed).toContain("goal:__diag__/C__Users_13178")
+    expect(env.store.has("goal:__diag__/C__Users_13178")).toBe(false)
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
   test("a deterministic subcommand notifies without waking a model turn", async () => {
     const env = mockCtx(missing)
     const cleanup = await plugin.setup(env.ctx as never)

@@ -9,6 +9,7 @@ import { createCompactionHook, createContextHook } from "./host/hooks"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
 import { createRepository } from "./store/repository"
+import { isSessionID } from "./store/keys"
 import { reconcile } from "./store/reconcile"
 
 const PLUGIN_ID = "opencode-goal"
@@ -132,11 +133,15 @@ export default {
     void reconcile({
       repo,
       sessionExists: async (sessionID) => {
+        // 伪造的 session id（早期探针留下的脏键）根本过不了宿主校验（400），
+        // 直接判定为不存在，交给 reconcile 清掉；否则会被当成“探测失败”永久保留。
+        if (!isSessionID(sessionID)) return false
         try {
           await ctx.session.get({ sessionID })
           return true
         } catch (error) {
-          return (error as { status?: number }).status === 404 ? false : true
+          const status = (error as { status?: number }).status
+          return !(status === 404 || status === 400)
         }
       },
       guardMs: options.reconcileGuardMinutes * 60_000,
