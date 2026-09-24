@@ -42,7 +42,7 @@ src/
     repository.ts  get/set/remove/scan（JSON + version 迁移）
     reconcile.ts   启动兜底（scan + ctx.session.get + guard）
   host/            opencode 适配 + 编排
-    events.ts      事件归并成本轮事实（session.status / Idle 标记 / session.next.* / session.deleted）
+    events.ts      事件归并成本轮事实（session.execution.* 轮边界 / session.step.* 记账 / session.deleted）
     context.ts     session context 钩子：常态轻量提醒 / 续跑注入
     compaction.ts  compaction 钩子：注入目标快照
     plan.ts        agent 检测（受限 agent 拦截）
@@ -117,8 +117,8 @@ goal({
 
 ## 8. 续跑与上下文注入
 
-- **触发**：目标 active 且会话空闲（`session.status = idle`）；轮末才续，**不打断**。
-- **轮边界/结果**：轮边界 = `session.status` 的 `busy → idle` 转换；中断 = `session.execution.interrupted`（等价于 `Session.Message.Idle` 的 `outcome: interrupted`）→ **`paused`**（宿主给定，非启发式）。
+- **触发**：目标 active 且一次执行成功结束（`session.execution.succeeded`）；轮末才续，**不打断**。`session.execution.failed` 只结算、不续跑（避免报错时形成续跑循环）。
+- **轮边界/结果**：轮边界 = `session.execution.started → succeeded`；中断 = `session.execution.interrupted`（等价于 `Session.Message.Idle` 的 `outcome: interrupted`）→ **`paused`**（宿主给定，非启发式）。
 - **会话恢复**默认不自动续。
 - **续跑轮**：注入完整 continuation prompt（XML 转义 objective + 预算 + 完成审计 + blocked 门槛）。
 - **常态（普通轮）**：只注入**轻量**提醒（"有 active 目标 → 先 `get_goal`；仅 active 才继续"），**不塞 objective**。
@@ -193,3 +193,7 @@ TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`�
 - `docs/codex/README.md`、`docs/omp/README.md`
 - `docs/opencode/config-install.md`、`docs/opencode/goal-plugins-landscape.md`
 - 宿主源码：`E:\Code\Projects\Agent\Externals\opencode`（分支 `v2`）
+
+## 17. 修订记录
+
+- **2026-09-25（冒烟修复）**：轮边界由 `session.status`（`busy → idle`）改为 `session.execution.*`。`session.status` / `session.idle` 是 deprecated 定义，虽在客户端 `V2Event` union 里，但**后端从不 emit**（全仓库唯一引用是 `event-manifest.ts` 的注册），因此轮结算与空闲续跑**一次都没执行过**。真实轮边界：`session.execution.started → succeeded`（`failed` 只结算、不续跑），中断仍为 `session.execution.interrupted` → `paused`。教训：**类型在 union 里 ≠ 后端会 emit**；单测 mock 不能替代真实事件流核对。复盘见实现计划文档。

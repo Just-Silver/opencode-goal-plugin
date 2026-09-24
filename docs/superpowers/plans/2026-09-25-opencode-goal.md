@@ -2598,6 +2598,8 @@ git commit -m "feat(host): 常态提醒与压缩快照注入"
   - `createEventRouter(deps: GoalDeps, tracker: TurnTracker, continuation: Continuation): EventRouter`
   - `src/server.ts` 的 `export default { id, setup }`（`satisfies Plugin.Plugin`）
 
+> ⚠️ **本任务的轮边界参考代码已过时**（用 `session.status`，后端不 emit）：正确的轮边界见文末「冒烟复盘（2026-09-25）」。以 `src/` 实际代码为准。
+>
 > 事件框架（已核对 v2 客户端类型）：`{ id, type, data: {...} }`。相关事件：`session.agent.selected{agent}`、`session.status{status:{type:"busy"|"idle"|"retry"}}`、`session.step.started{started}`、`session.step.ended{tokens}`、`session.text.ended{text}`、`session.reasoning.ended{text}`、`session.tool.called`、`session.deleted`。`tokens = { input, output, reasoning, cache:{read,write} }`。
 
 - [ ] **Step 1: 写失败测试 `src/host/events.test.ts`**
@@ -3218,6 +3220,21 @@ git commit -m "docs: README（安装/配置/用法/开发）"
 - **spec §8 缺口**：原计划未实现“中断 → `paused`” → Task 15 新增 `session.execution.interrupted` 分支。
 - **测试名不副实**：Task 12 的“受限 agent 拒 resume”实际走 `not-resumable` → 改为直接存入 `paused` 目标再断言 `/cannot resume/`。
 - **spec 与实现对齐**：spec §8 的“`Session.Message.Idle` 轮边界”更新为 `session.status`（busy→idle）+ `session.execution.interrupted`。
+
+## 冒烟复盘（2026-09-25）
+
+**现象**：手动冒烟 `/goal 1~100，每次只输出10个。直到100` → `goal(op="create")` 成功（`status: active`），模型输出第 1 批后 `finish: "stop"`，会话进入 idle，**没有任何续跑**。
+
+**根因**：`src/host/events.ts` 把轮边界建在 `session.status` 的 `busy → idle` 上，但该事件在 v2 **后端从不 emit** —— `session-status-event.ts` 内标 `// deprecated`，全仓库唯一引用是 `event-manifest.ts` 的注册；客户端 `session.status()` 状态是拿 `session.execution.*` 推导的。于是 `turnOpen` 永远为空，结算分支与续跑分支永不执行（`emptyStreak` / `blockerStreak` / 本轮是否报 block 同样永不更新；token 记账走 `session.step.ended`，不受影响）。
+
+**证据**：
+1. 冒烟会话导出：create 成功、无续跑轮；
+2. 宿主源码 `packages/core/src/session/execution.ts` 真实 publish `session.execution.started/succeeded/failed/interrupted`；
+3. 真实事件流（`GET /api/event` 订阅 + 往冒烟会话发一条消息）：全程 0 个 `session.status`，轮边界表现为 `session.execution.started … session.execution.succeeded`。
+
+**修复**：轮边界改为 `session.execution.started`（开轮）→ `session.execution.succeeded`（结算 + 续跑）；`session.execution.failed` 只结算、**不续跑**（避免报错时形成续跑循环，终态错误 → `blocked` 仍属阶段二）；`session.execution.interrupted` → `paused` 不变。单测 helper 由 `busy/idle`（`session.status`）改为 `executionStarted/executionSucceeded/executionFailed`，并新增「failed 不续跑」「deprecated `session.status` 不影响轮」两例。
+
+**教训**：当初「已核对 v2 客户端类型」只确认了 `session.status` 在 `V2Event` union 里存在 —— **类型在 union 里 ≠ 后端会 emit**。单测用 mock 事件自证会掩盖这类契约错配，必须用真实事件流核对。
 
 ## Execution Handoff
 

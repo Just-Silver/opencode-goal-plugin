@@ -100,39 +100,42 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           return
         }
 
-        case "session.status": {
-          const status = (data.status ?? {}) as Record<string, unknown>
-          const kind = typeof status.type === "string" ? status.type : "unknown"
+        // 轮边界用 session.execution.*（v2 后端真实事件）；session.status 是 deprecated 定义，
+        // 后端从不 emit，曾导致轮结算与续跑永不执行（详见 docs 冒烟复盘）。
+        case "session.execution.started": {
+          // 开轮边沿：一次执行只会 started 一次，重复 started 不重启轮。
+          if (turnOpen.has(sessionID)) return
+          turnOpen.add(sessionID)
+          tracker(sessionID).start(pendingAutomatic.delete(sessionID))
+          blockedThisTurn.set(sessionID, false)
+          return
+        }
 
-          // 只按轮的开合边沿动作：重复 busy / busy→retry→busy 不重启轮；
-          // 未开轮时的 idle（首个 idle、retry→idle）不结算、不续跑。
-          if (kind === "busy" && !turnOpen.has(sessionID)) {
-            turnOpen.add(sessionID)
-            tracker(sessionID).start(pendingAutomatic.delete(sessionID))
-            blockedThisTurn.set(sessionID, false)
-          }
-
-          if (kind === "idle" && turnOpen.has(sessionID)) {
-            turnOpen.delete(sessionID)
-            const facts = tracker(sessionID).finish()
-            const reportedBlocker = blockedThisTurn.get(sessionID) === true
-            blockedThisTurn.set(sessionID, false)
-            let blocked = false
-            await save(sessionID, (goal, now) => {
-              const result = applyTurn(goal, facts, deps.options.emptyThreshold, now)
-              blocked = result.blocked
-              // spec §7：某轮未报 block → streak 归零；报了 block 则保留（由本层判定，model 只负责归零）。
-              return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
-            })
-            if (blocked) return
-            const goal = await deps.repo.load(sessionID)
-            if (!goal || goal.status !== "active") return
-            // spec §12：agent 未知时保守跳过续跑，绝不回退成 "build" 放行受限 agent。
-            const agent = agents.get(sessionID)
-            if (agent === undefined) return
-            const injected = await continuation.onIdle(sessionID, agent)
-            if (injected) pendingAutomatic.add(sessionID)
-          }
+        case "session.execution.succeeded":
+        case "session.execution.failed": {
+          // 轮结束才结算；未开轮的结束事件（插件重启后接入）不结算、不续跑。
+          if (!turnOpen.has(sessionID)) return
+          turnOpen.delete(sessionID)
+          const facts = tracker(sessionID).finish()
+          const reportedBlocker = blockedThisTurn.get(sessionID) === true
+          blockedThisTurn.set(sessionID, false)
+          let blocked = false
+          await save(sessionID, (goal, now) => {
+            const result = applyTurn(goal, facts, deps.options.emptyThreshold, now)
+            blocked = result.blocked
+            // spec §7：某轮未报 block → streak 归零；报了 block 则保留（由本层判定，model 只负责归零）。
+            return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
+          })
+          // 只有成功结束才续跑：failed 保守跳过，避免在报错时形成续跑循环。
+          if (event.type !== "session.execution.succeeded") return
+          if (blocked) return
+          const goal = await deps.repo.load(sessionID)
+          if (!goal || goal.status !== "active") return
+          // spec §12：agent 未知时保守跳过续跑，绝不回退成 "build" 放行受限 agent。
+          const agent = agents.get(sessionID)
+          if (agent === undefined) return
+          const injected = await continuation.onIdle(sessionID, agent)
+          if (injected) pendingAutomatic.add(sessionID)
           return
         }
 
