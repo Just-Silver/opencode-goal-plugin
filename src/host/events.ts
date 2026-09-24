@@ -23,7 +23,6 @@ function num(value: unknown): number {
 
 export function createEventRouter(deps: GoalDeps, continuation: Continuation): EventRouter {
   const agents = new Map<string, string>()
-  const lastStatus = new Map<string, string>()
   const pendingAutomatic = new Set<string>()
   const blockedThisTurn = new Map<string, boolean>()
   const stepStartedAt = new Map<string, number>()
@@ -59,7 +58,14 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           return
         }
 
+        case "session.created": {
+          // 会话创建时携带的 agent：插件重启/未经过 switchAgent 时也要记下，供续跑限制判定。
+          if (typeof data.agent === "string") agents.set(sessionID, data.agent)
+          return
+        }
+
         case "session.step.started": {
+          if (typeof data.agent === "string") agents.set(sessionID, data.agent)
           stepStartedAt.set(sessionID, typeof data.started === "number" ? data.started : deps.now())
           return
         }
@@ -97,7 +103,6 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
         case "session.status": {
           const status = (data.status ?? {}) as Record<string, unknown>
           const kind = typeof status.type === "string" ? status.type : "unknown"
-          lastStatus.set(sessionID, kind)
 
           // 只按轮的开合边沿动作：重复 busy / busy→retry→busy 不重启轮；
           // 未开轮时的 idle（首个 idle、retry→idle）不结算、不续跑。
@@ -122,7 +127,10 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
             if (blocked) return
             const goal = await deps.repo.load(sessionID)
             if (!goal || goal.status !== "active") return
-            const injected = await continuation.onIdle(sessionID, agents.get(sessionID) ?? "build")
+            // spec §12：agent 未知时保守跳过续跑，绝不回退成 "build" 放行受限 agent。
+            const agent = agents.get(sessionID)
+            if (agent === undefined) return
+            const injected = await continuation.onIdle(sessionID, agent)
             if (injected) pendingAutomatic.add(sessionID)
           }
           return
@@ -132,6 +140,8 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           // spec §8：中断（Esc / 关闭 / 超时）→ paused；丢弃未完成轮的残留状态，恢复后默认不自动续。
           turnOpen.delete(sessionID)
           pendingAutomatic.delete(sessionID)
+          blockedThisTurn.delete(sessionID)
+          stepStartedAt.delete(sessionID)
           trackers.delete(sessionID)
           await save(sessionID, (goal, now) => (goal.status === "active" ? pause(goal, now) : goal))
           return
@@ -140,7 +150,6 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
         case "session.deleted": {
           await deps.repo.remove(sessionID)
           agents.delete(sessionID)
-          lastStatus.delete(sessionID)
           pendingAutomatic.delete(sessionID)
           blockedThisTurn.delete(sessionID)
           stepStartedAt.delete(sessionID)

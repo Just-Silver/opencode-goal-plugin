@@ -63,6 +63,7 @@ describe("transitions", () => {
     const resumed = resume(blocked, 5000)
     expect(resumed.status).toBe("active")
     expect(resumed.blockerKey).toBeUndefined()
+    expect(resumed.blockerText).toBeUndefined()
     expect(resumed.blockerStreak).toBe(0)
     expect(resumed.emptyStreak).toBe(0)
   })

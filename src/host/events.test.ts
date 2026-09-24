@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
 import { createGoal } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
+import { createContinuation } from "./continuation"
 import { createEventRouter } from "./events"
 import type { GoalDeps } from "./deps"
 
@@ -147,6 +148,8 @@ describe("createEventRouter", () => {
     })
 
     // A 完成一个用户轮 → 注入续跑，A 置 pending
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_a", agent: "build" } })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_b", agent: "build" } })
     await router.handle(busy("ses_a"))
     await router.handle(idle("ses_a"))
     // B 走一个用户轮（无自己的 pending）→ 不得消费 A 的 pending
@@ -172,6 +175,7 @@ describe("createEventRouter", () => {
       },
     })
 
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle(busy("ses_1"))
     await router.handle(idle("ses_1")) // 用户轮 → 注入一次
     await router.handle(busy("ses_1"))
@@ -214,6 +218,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const router = createEventRouter(deps, { onIdle: async () => true })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle(busy("ses_1"))
     await router.handle(idle("ses_1")) // 注入续跑 → pending 置位
     await router.handle({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
@@ -235,6 +240,7 @@ describe("createEventRouter", () => {
         return true
       },
     })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle(busy("ses_1"))
     await router.handle(idle("ses_1")) // pending 置位 + 注入
     await router.handle({ type: "session.deleted", data: { sessionID: "ses_1" } })
@@ -245,5 +251,58 @@ describe("createEventRouter", () => {
     await router.handle(idle("ses_1"))
     expect(await deps.repo.load("ses_1")).toBeUndefined()
     expect(injected).toBe(before)
+  })
+
+  test("an unknown agent skips continuation", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = createEventRouter(
+      deps,
+      createContinuation(deps, {
+        prompt: async (sessionID) => {
+          prompts.push(sessionID)
+        },
+      }),
+    )
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1"))
+    expect(prompts).toEqual([])
+  })
+
+  test("a plan agent learned from step.started does not continue", async () => {
+    const deps = { ...makeDeps(), isRestricted: (agentId: string) => agentId === "plan" }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = createEventRouter(
+      deps,
+      createContinuation(deps, {
+        prompt: async (sessionID) => {
+          prompts.push(sessionID)
+        },
+      }),
+    )
+    await router.handle(busy("ses_1"))
+    await router.handle({ type: "session.step.started", data: { sessionID: "ses_1", agent: "plan", started: 0 } })
+    await router.handle(idle("ses_1"))
+    expect(prompts).toEqual([])
+  })
+
+  test("a plan agent learned from session.created does not continue", async () => {
+    const deps = { ...makeDeps(), isRestricted: (agentId: string) => agentId === "plan" }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = createEventRouter(
+      deps,
+      createContinuation(deps, {
+        prompt: async (sessionID) => {
+          prompts.push(sessionID)
+        },
+      }),
+    )
+    await router.handle({ type: "session.created", data: { sessionID: "ses_1", agent: "plan" } })
+    await router.handle(busy("ses_1"))
+    await router.handle(idle("ses_1"))
+    expect(prompts).toEqual([])
   })
 })

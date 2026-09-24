@@ -3,12 +3,11 @@ import type { Goal, GoalStatus } from "./types"
 export type GoalErrorCode = "budget-exceeds-max" | "not-resumable" | "not-completable"
 
 export class GoalError extends Error {
-  constructor(
-    readonly code: GoalErrorCode,
-    message: string,
-  ) {
+  readonly code: GoalErrorCode
+  constructor(code: GoalErrorCode, message: string) {
     super(message)
     this.name = "GoalError"
+    this.code = code
   }
 }
 
@@ -51,7 +50,7 @@ export function pause(goal: Goal, now: number): Goal {
 export function resume(goal: Goal, now: number): Goal {
   if (goal.status !== "paused" && goal.status !== "blocked" && goal.status !== "budget-limited")
     throw new GoalError("not-resumable", `not-resumable: cannot resume a ${goal.status} goal`)
-  return next(goal, "active", now, { blockerKey: undefined, blockerStreak: 0, emptyStreak: 0 })
+  return next(goal, "active", now, { blockerKey: undefined, blockerText: undefined, blockerStreak: 0, emptyStreak: 0 })
 }
 
 export function complete(goal: Goal, now: number): Goal {

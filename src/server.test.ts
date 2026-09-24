@@ -17,9 +17,10 @@ const ORPHAN = {
 function mockCtx(get: () => Promise<unknown>) {
   const store = new Map<string, unknown>()
   const removed: string[] = []
-  const commands: Array<{ name: string }> = []
+  const commands: Array<{ name: string; execute: (input: { sessionID: string; prompt: { text: string } }) => Promise<void> }> = []
   const tools: Array<{ name: string }> = []
   const hooks: string[] = []
+  const synthetic: Array<Record<string, unknown>> = []
   const storage = {
     async get(key: string) {
       return store.get(key)
@@ -41,7 +42,11 @@ function mockCtx(get: () => Promise<unknown>) {
     options: {},
     storage,
     command: {
-      transform: async (cb: (editor: { add: (def: { name: string }) => void }) => void) => {
+      transform: async (
+        cb: (editor: {
+          add: (def: { name: string; execute: (input: { sessionID: string; prompt: { text: string } }) => Promise<void> }) => void
+        }) => void,
+      ) => {
         cb({ add: (def) => commands.push(def) })
       },
     },
@@ -55,14 +60,17 @@ function mockCtx(get: () => Promise<unknown>) {
         hooks.push(name)
       },
       prompt: async () => ({}),
-      synthetic: async () => ({}),
+      synthetic: async (input: Record<string, unknown>) => {
+        synthetic.push(input)
+        return {}
+      },
       get,
     },
     event: {
       subscribe: () => (async function* () {})(),
     },
   }
-  return { store, removed, commands, tools, hooks, ctx }
+  return { store, removed, commands, tools, hooks, synthetic, ctx }
 }
 
 const missing = async (): Promise<unknown> => {
@@ -103,6 +111,21 @@ describe("server", () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(env.removed).toEqual([])
     expect(env.store.has("goal:ses_orphan")).toBe(true)
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
+  test("a deterministic subcommand notifies without waking a model turn", async () => {
+    const env = mockCtx(missing)
+    const cleanup = await plugin.setup(env.ctx as never)
+    const command = env.commands[0]
+    expect(command).toBeDefined()
+
+    await command!.execute({ sessionID: "ses_1", prompt: { text: "status" } })
+
+    expect(env.synthetic).toHaveLength(1)
+    expect(env.synthetic[0]).toMatchObject({ sessionID: "ses_1", resume: false })
+    expect(env.synthetic[0]?.resume).toBe(false)
 
     if (typeof cleanup === "function") await cleanup()
   })

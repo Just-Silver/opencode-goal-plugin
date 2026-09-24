@@ -33,7 +33,7 @@ export default {
         execute: async (input) => {
           const handler = createCommandHandler(deps, {
             prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }).then(() => undefined),
-            notify: (sessionID, text) => ctx.session.synthetic({ sessionID, text }).then(() => undefined),
+            notify: (sessionID, text) => ctx.session.synthetic({ sessionID, text, resume: false }).then(() => undefined),
           })
           await handler({ sessionID: input.sessionID, prompt: { text: input.prompt.text } })
         },
