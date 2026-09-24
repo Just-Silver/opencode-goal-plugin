@@ -608,6 +608,8 @@ export function applyBlocker(
   threshold: number,
   now: number,
 ): { goal: Goal; blocked: boolean } {
+  // 仅对 active 目标计数（与 applyTurn 对称）：非 active 原样返回，不增长 streak、不改状态
+  if (goal.status !== "active") return { goal, blocked: false }
   const key = normalizeBlockerKey(report.key)
   const streak = goal.blockerKey === key ? goal.blockerStreak + 1 : 1
   const blocked = streak >= threshold
@@ -866,9 +868,9 @@ Expected: FAIL
 ```ts
 import type { Goal } from "./types"
 
-/** 预算命中 → budget-limited。仅从 active 触发；优先级高于 blocked（系统事实压过模型主观）。 */
+/** 预算命中 → budget-limited。可从 active 或 blocked 升级；优先级高于 blocked（系统事实压过模型主观）。 */
 export function applyBudget(goal: Goal, now: number): Goal {
-  if (goal.status !== "active") return goal
+  if (goal.status !== "active" && goal.status !== "blocked") return goal
   if (goal.tokenBudget === undefined) return goal
   if (goal.tokensUsed < goal.tokenBudget) return goal
   return { ...goal, status: "budget-limited", updatedAt: now }
