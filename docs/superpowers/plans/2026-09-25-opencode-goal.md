@@ -2848,7 +2848,7 @@ export function createEventRouter(deps: GoalDeps, tracker: TurnTracker, continua
               const result = applyTurn(goal, facts, deps.options.emptyThreshold, now)
               blocked = result.blocked
               // spec §7：某轮未报 block → streak 归零
-              return resetBlockerStreak(result.goal, reportedBlocker)
+              return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
             })
             if (blocked) return
             const goal = await deps.repo.load(sessionID)
