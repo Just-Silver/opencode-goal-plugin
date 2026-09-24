@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
-import { createGoal } from "../model/goal"
-import { createRepository, type StorageLike } from "../store/repository"
+import { createGoal, pause } from "../model/goal"
+import { createRepository, type Repository, type StorageLike } from "../store/repository"
 import { createCommandHandler, parseGoalCommand } from "./commands"
 import type { GoalDeps } from "./deps"
 
@@ -27,6 +27,11 @@ describe("parseGoalCommand", () => {
   test("a bare start falls through to an objective", () => {
     expect(parseGoalCommand("start")).toEqual({ kind: "objective", objective: "start" })
   })
+
+  test("a reserved name ignores any trailing arguments", () => {
+    expect(parseGoalCommand("resume now")).toEqual({ kind: "resume" })
+    expect(parseGoalCommand("status please")).toEqual({ kind: "status" })
+  })
 })
 
 function memoryStorage(): StorageLike {
@@ -47,14 +52,7 @@ function memoryStorage(): StorageLike {
   }
 }
 
-function makeHandler() {
-  const deps: GoalDeps = {
-    repo: createRepository(memoryStorage()),
-    options: { ...DEFAULT_OPTIONS },
-    now: () => 1000,
-    newGoalId: () => "g1",
-    isRestricted: () => false,
-  }
+function runner(deps: GoalDeps) {
   const prompts: string[] = []
   const notices: string[] = []
   const handler = createCommandHandler(deps, {
@@ -65,7 +63,18 @@ function makeHandler() {
       notices.push(text)
     },
   })
-  return { deps, handler, prompts, notices }
+  return { handler, prompts, notices }
+}
+
+function makeHandler() {
+  const deps: GoalDeps = {
+    repo: createRepository(memoryStorage()),
+    options: { ...DEFAULT_OPTIONS },
+    now: () => 1000,
+    newGoalId: () => "g1",
+    isRestricted: () => false,
+  }
+  return { deps, ...runner(deps) }
 }
 
 describe("createCommandHandler", () => {
@@ -97,5 +106,50 @@ describe("createCommandHandler", () => {
     const { handler, notices } = makeHandler()
     await handler({ sessionID: "ses_1", prompt: { text: "" } })
     expect(notices[0]).toContain("No goal")
+  })
+
+  test("resume on a non-resumable goal reports it and leaves the status unchanged", async () => {
+    const { deps, handler, notices } = makeHandler()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    await handler({ sessionID: "ses_1", prompt: { text: "resume" } })
+    expect(notices.some((line) => line.includes("nothing to resume"))).toBe(true)
+    expect((await deps.repo.load("ses_1"))?.status).toBe("active")
+  })
+
+  test("pause on a non-active goal reports nothing to pause", async () => {
+    const { deps, handler, notices } = makeHandler()
+    await deps.repo.save("ses_1", pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1))
+    await handler({ sessionID: "ses_1", prompt: { text: "pause" } })
+    expect(notices.some((line) => line.includes("nothing to pause"))).toBe(true)
+    expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
+  })
+
+  test("pause and clear without a goal do not throw and report no goal", async () => {
+    const { handler, notices } = makeHandler()
+    await handler({ sessionID: "ses_1", prompt: { text: "pause" } })
+    await handler({ sessionID: "ses_1", prompt: { text: "clear" } })
+    expect(notices).toHaveLength(2)
+    expect(notices.every((line) => line.includes("No goal"))).toBe(true)
+  })
+
+  test("a storage error while resuming propagates instead of being reported as not-resumable", async () => {
+    const stored = pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1)
+    const repo: Repository = {
+      load: async () => stored,
+      save: async () => {
+        throw new Error("storage down")
+      },
+      remove: async () => {},
+      listAll: async () => [],
+    }
+    const { handler, notices } = runner({
+      repo,
+      options: { ...DEFAULT_OPTIONS },
+      now: () => 1000,
+      newGoalId: () => "g1",
+      isRestricted: () => false,
+    })
+    await expect(handler({ sessionID: "ses_1", prompt: { text: "resume" } })).rejects.toThrow("storage down")
+    expect(notices).toHaveLength(0)
   })
 })

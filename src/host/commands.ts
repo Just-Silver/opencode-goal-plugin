@@ -61,12 +61,14 @@ export function createCommandHandler(deps: GoalDeps, port: CommandPort): (input:
       }
       case "resume": {
         if (!existing) return port.notify(sessionID, "No goal is set for this session.")
+        let resumed: Goal
         try {
-          await deps.repo.save(sessionID, resume(existing, now))
-          return port.notify(sessionID, "Goal resumed.")
+          resumed = resume(existing, now)
         } catch {
           return port.notify(sessionID, `Goal is ${existing.status}; nothing to resume.`)
         }
+        await deps.repo.save(sessionID, resumed)
+        return port.notify(sessionID, "Goal resumed.")
       }
       case "clear": {
         if (!existing) return port.notify(sessionID, "No goal is set for this session.")
