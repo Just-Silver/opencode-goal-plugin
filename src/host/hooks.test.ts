@@ -67,4 +67,26 @@ describe("createCompactionHook", () => {
     await hook(input)
     expect(input.system).toHaveLength(0)
   })
+
+  test("appends the goal snapshot even when the goal is paused", async () => {
+    const deps = makeDeps()
+    const paused = { ...createGoal({ goalId: "g1", objective: "keep me", now: 0 }), status: "paused" as const }
+    await deps.repo.save("ses_1", paused)
+    const hook = createCompactionHook(deps)
+    const input = { sessionID: "ses_1", agent: "build", system: [] as { type: "text"; text: string }[] }
+    await hook(input)
+    expect(input.system).toHaveLength(1)
+    expect(input.system[0]?.text).toContain("keep me")
+  })
+
+  test("appends the goal snapshot even when the goal is complete", async () => {
+    const deps = makeDeps()
+    const complete = { ...createGoal({ goalId: "g1", objective: "keep me", now: 0 }), status: "complete" as const }
+    await deps.repo.save("ses_1", complete)
+    const hook = createCompactionHook(deps)
+    const input = { sessionID: "ses_1", agent: "build", system: [] as { type: "text"; text: string }[] }
+    await hook(input)
+    expect(input.system).toHaveLength(1)
+    expect(input.system[0]?.text).toContain("keep me")
+  })
 })
