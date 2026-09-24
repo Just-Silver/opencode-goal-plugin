@@ -9,7 +9,7 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 ```jsonc
 {
   "plugins": [
-    { "package": "github:Just-Silver/opencode-goal#<ref>", "options": {} }
+    { "package": "github:Just-Silver/opencode-goal-plugin#<ref>", "options": {} }
   ]
 }
 ```
@@ -18,11 +18,19 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 
 `package` 支持所有 `npm-package-arg` 认可的 git 形态：
 
-- `github:Just-Silver/opencode-goal#<ref>`
-- `git+https://github.com/Just-Silver/opencode-goal.git#<ref>`
-- `git+ssh://git@github.com/Just-Silver/opencode-goal.git#<ref>`
+- `github:Just-Silver/opencode-goal-plugin#<ref>`
+- `git+https://github.com/Just-Silver/opencode-goal-plugin.git#<ref>`
+- `git+ssh://git@github.com/Just-Silver/opencode-goal-plugin.git#<ref>`
 
 宿主会把包安装到 opencode 缓存目录（`<global cache>/npm/<key>/<generation>/node_modules/opencode-goal`），再经该包 `package.json` 的 `exports` 解析 `server` 入口。
+
+**实测（2026-09-24，本机）**：装好后日志里 `msg="loading plugin"` 的 `entrypoint` 为
+`<cache>/npm/git-opencode-goal-plugin-<hash>/<generation>/node_modules/opencode-goal/src/server.ts`。要点：
+
+- **git 安装走 `exports`**（`"./server"` → `./src/server.ts`）；**本地目录安装走 `<dir>/server`** —— 两条解析路径不同，改动入口时要两边都照顾。
+- `package.json` 的 `"files": ["src"]` 生效：缓存副本里只有 `src/` + `package.json`/`README.md`/`LICENSE`，**根目录的 `server.ts` 不在**（git 安装不需要它）。
+- **Windows**：未钉版本的 git 源在冷启动做更新检查时会 spawn `git ls-remote` 且未加 `CREATE_NO_WINDOW` → **弹出可见的控制台窗口**（上游问题）。Pin 到 40 位 commit SHA 可跳过该检查。
+- 改名/改 ref 才会重新克隆：**同名 spec（含 ref）会命中旧缓存**，代码改了也不重拉（需清 `<cache>/npm/git-*` 或换 ref）。
 
 ### 本地目录安装（开发用）
 

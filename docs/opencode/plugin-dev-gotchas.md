@@ -27,6 +27,7 @@
 | 13 | 插件 API 抛的是 `Schema.TaggedError`，**没有 HTTP `status`** | 判「会话是否还在」要认 `_tag`（`Session.NotFoundError`）；按 `status === 404` 判**永远不成立**，清理逻辑会静默失效 |
 | 14 | `session.deleted` 的 payload **只有 `sessionID`**（不带 `location`） | 归属判定必须**豁免**它：会话已删时回落查询必然失败，否则删除事件被丢弃、KV 记录永久残留 |
 | 15 | 测试里**编造**错误/事件形状 | 会遮住真 bug：我们编了 `{status: 404}`、测试助手还自动补 `location`，155 个测试全绿却漏掉两个真 bug |
+| 16 | 包安装与本地目录的**入口解析路径不同** | git/npm 安装走 `exports`（且按 `files` 过滤，运行时文件必须放进 `src/`）；本地目录走 `<dir>/server`。改入口两边都要照顾 |
 
 ---
 
@@ -158,6 +159,21 @@ async function belongsToThisLocation(sessionID: string) {
 
 缺入口 ⇒ `ConfigPluginSource.scan()` **静默丢弃**（无任何报错）。本仓库因此加了根 `server.ts`（`export { default } from "./src/server"`）。
 
+**包安装（npm / git）与本地目录：入口解析路径不同**（实测 2026-09-24）：
+
+| 安装方式 | 解析 | 实测 `entrypoint` |
+| --- | --- | --- |
+| 本地目录 | `Host.resolve({ directory })` → `<dir>/server` → `<dir>/index`（`main` / `exports` **都不参与**） | `file:///<仓库绝对路径>/src/server.ts` |
+| npm / git 包 | 经包 `package.json` 的 `exports`（`"./server"` / `"."`） | `<cache>/npm/git-<owner>-<repo>-<hash>/<gen>/node_modules/opencode-goal/src/server.ts` |
+
+配套事实（均为真机实测）：
+
+- **git 安装按 `files` 过滤**：本仓库 `"files": ["src"]` ⇒ 缓存副本里只有 `src/` + `package.json` + `README.md` + `LICENSE`，**根目录的 `server.ts` 不在**。所以本地目录安装的入口（根 `server.ts`）不是"唯一入口"，改入口/加运行时文件时两条路径都要照顾（运行时文件必须放进 `src/`）。
+- `"private": true` **不影响** git 安装（只挡 `npm publish`）。
+- **同名 spec（含 ref）命中旧缓存**：代码改了也不会重拉 ⇒ 换 40 位 SHA 或清 `<cache>/npm/git-*`。
+- 判定当前加载来源就看日志：`msg="loading plugin" id=<spec> entrypoint=<file://…>`。
+- 顺带：`github:` 形态在 Windows 上若**不钉版本**，冷启动的更新检查会 spawn `git ls-remote` 且未加 `CREATE_NO_WINDOW` ⇒ **弹可见控制台窗口**（上游问题）；钉 40 位 commit SHA 可跳过。
+
 ### 3.2 配置安装的目标必须是目录
 
 指向文件会打印 `configured plugin path must be a directory` 并丢弃。相对路径相对**配置文件所在目录**；也支持 `file:///...`。
@@ -279,7 +295,7 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 
 ### 8.2 `session.deleted` 的 payload 只有 `sessionID`（不带 `location`）
 
-- 出处：`packages/schema/src/session-event.ts` —— `Deleted` 用 `schema: Base`，`Base = { sessionID }`；对照 `Created` 才有 `location: Location.Ref`（真机事件流里 `session.created` 带 `C:\Users\13178`，`session.deleted` 不带）。
+- 出处：`packages/schema/src/session-event.ts` —— `Deleted` 用 `schema: Base`，`Base = { sessionID }`；对照 `Created` 才有 `location: Location.Ref`（真机事件流里 `session.created` 带 location，`session.deleted` 不带）。
 - 后果：凡「先判归属、再处理」的路由都会把它判成「不属于本实例」丢掉；而此时会话已不存在，回落查询必然失败（§8.1）→ **删除事件永远被丢弃，KV 记录永久残留**。
 - **正确做法**：`session.deleted` **豁免归属判定**（会话已删时归属没有意义；`remove` 幂等，多 location 实例重复执行无害）。
 
