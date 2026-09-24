@@ -51,6 +51,34 @@ describe("transitions", () => {
     expect(() => resume(complete(goal, 2000), 3000)).toThrow(/not-resumable/)
   })
 
+  test("resume clears the blocker audit and zeroes emptyStreak", () => {
+    const blocked = {
+      ...goal,
+      status: "blocked" as const,
+      blockerKey: "build-failed",
+      blockerText: "build failed",
+      blockerStreak: 3,
+      emptyStreak: 2,
+    }
+    const resumed = resume(blocked, 5000)
+    expect(resumed.status).toBe("active")
+    expect(resumed.blockerKey).toBeUndefined()
+    expect(resumed.blockerStreak).toBe(0)
+    expect(resumed.emptyStreak).toBe(0)
+  })
+
+  test("resumes from budget-limited", () => {
+    const limited = { ...goal, status: "budget-limited" as const }
+    expect(resume(limited, 6000).status).toBe("active")
+  })
+
+  test("pause leaves a complete goal untouched", () => {
+    const done = complete(goal, 2000)
+    const paused = pause(done, 3000)
+    expect(paused.status).toBe("complete")
+    expect(paused.updatedAt).toBe(2000)
+  })
+
   test("drop clears the blocker audit and stops the goal", () => {
     const blocked = { ...goal, status: "blocked" as const, blockerStreak: 2 }
     const dropped = drop(blocked, 4000)

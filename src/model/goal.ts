@@ -44,6 +44,7 @@ function next(goal: Goal, status: GoalStatus, now: number, patch: Partial<Goal> 
 }
 
 export function pause(goal: Goal, now: number): Goal {
+  if (goal.status !== "active") return goal
   return next(goal, "paused", now)
 }
 
