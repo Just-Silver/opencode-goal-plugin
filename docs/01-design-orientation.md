@@ -21,12 +21,12 @@
 
 ## 2. 命令面（用户入口）**[定]**
 
-**只有一个命令 `/goal`，自适应**（合并"自动结构化"与"访谈"）：
+**多命令，而非子命令**（宿主没有子命令概念，后台拦截保留名容易误触）：
 
 | 命令 | 作用 |
 | --- | --- |
 | `/goal <text>` | 模型先判断输入信息是否足够（可判定成功标准 / 验证方法 / 范围边界 / 停止条件）：够 → 自动结构化后直接 `create`；不够 → 先访谈（一次一问、≤6 问），问全再 `create` |
-| `/goal pause` / `resume` / `clear` | 生命周期控制（**服务端确定性处理**，尽量不经模型） |
+| `/goal-status` / `-pause` / `-resume` / `-clear` | 生命周期控制（**服务端确定性处理**，不经模型）；名字跟随 `command_name` |
 
 - 对齐 superpowers 的 brainstorm-before-build：**先把目标逼到可验证，再让它自主跑**；由模型按输入质量**自适应**决定是否追问。
 - 命令是"薄壳"：把用户输入包装成受控 prompt，让模型调用单一 `goal` 工具（或直接由服务端处理 pause/resume/clear）。
@@ -61,7 +61,7 @@ goal({
 | 状态 | 谁设 | 规则 |
 | --- | --- | --- |
 | `active` | 创建 / resume | — |
-| `paused` | 用户命令 / 系统 | `/goal pause`，或中断/失败 |
+| `paused` | 用户命令 / 系统 | `/goal-pause`，或中断/失败 |
 | `blocked` | **服务端裁决**（模型只报告） | 模型调 `goal({op:"block", blocker_key, blocker})` 报告；**服务端只按 `blocker_key` 数连续轮**：同 key 连续报 `>= 3` 才置 `blocked`；换 key 重数；任一轮未报 block / `resume` / 新建目标 → 归零 |
 | `budget-limited` | 系统 | 记账后 tokens 超预算 |
 | `complete` | 模型 | 需证据审计通过 |
@@ -129,7 +129,7 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
   - 目标（含 **>4000 字符的完整原文**）、status、token 预算/用量、时间、`blockerKey/blockerStreak`、`autoTurns`、`lastContinuationAt`、`version` 等。
   - 即 **"会话文件 + 目标引用文件"合并成同一条记录**；超长目标不再需要单独文件。
   - `<sessionID>` = OpenCode 会话 ID。
-- **清理（事件驱动）**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal clear` 同。`complete/paused/blocked/budget-limited` 保留。（**注意**：该事件不带 `location`，归属判定必须豁免它；见 gotchas §8.2。）
+- **清理（事件驱动）**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal-clear` 同。`complete/paused/blocked/budget-limited` 保留。（**注意**：该事件不带 `location`，归属判定必须豁免它；见 gotchas §8.2。）
 - **启动兜底 reconcile**：`storage.scan({prefix:"goal:"})` 得本地 ID；用**官方 `ctx.session.get(id)` 判活**；不存在且记录 `updatedAt` 超过 5 分钟 → remove（mtime 保险的等价物）。查不到/出错一律跳过、不删。只在**启动**跑一次。（**实现偏差已修**：见 `plugin-dev-gotchas.md` §8.1——插件侧的「不存在」是 `_tag: "Session.NotFoundError"`，**没有** `status`。）
 - **超长目标的注入**：续跑注入摘要 + "调 `goal({op:"get"})` 取完整目标"（**工具引用取代文件路径**）；完成审计强制 `get_goal` 复核。
 

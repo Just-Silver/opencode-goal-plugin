@@ -8,7 +8,7 @@
 1. 按 README 的 `plugins` 配置装好插件并启动 OpenCode V2。
 2. 发：`/goal 在仓库根目录创建一个 hello.txt，内容为 hello，然后用 ls 验证文件存在`。
 3. 观察：模型把目标结构化 → 调 `goal(op="create")` → 完成工作后调 `goal(op="complete")` → 状态变 `complete`。
-4. `/goal status` 报告状态；`/goal clear` 后 KV 记录消失（再 `/goal status` 应报 “No goal”）。
+4. `/goal-status` 报告状态；`/goal-clear` 后 KV 记录消失（再 `/goal-status` 应报 “No goal”）。
 5. 制造空转：`/goal` 一个当前无法推进的目标，确认连续 3 个自动续跑轮后状态变 `blocked`，且工具返回带收尾指令。
 6. 跨轮续跑：设一个需要分批做的目标，确认**每轮只落一行 48 字符触发语**、目标本体不出现在转录里，且能跨多轮做完并 `complete`。
 

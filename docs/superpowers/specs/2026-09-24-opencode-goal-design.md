@@ -60,12 +60,18 @@ src/
 
 ## 4. 命令面
 
-**业务命令只有一个 `/goal`**（避免与内置冲突；`command_name` 可配）。另有**调试命令** `/goal-debug`（`debug_command_name` 可配；只读、零 token、**不注入模型上下文**）。
+**没有子命令** —— 宿主只有 `name` + 参数文本，没有子命令概念；后台拦截保留名会让用户打错一个字就变成目标文字。所以状态控制是**独立命令**，全部服务端确定性处理、零 token；只有 `/goal <目标>` 会转发给模型。名字跟随 `command_name`（默认 `goal`，派生命令为 `<name>-status` / `-pause` / `-resume` / `-clear`）。另有**调试命令** `/goal-debug`（`debug_command_name` 可配；只读、零 token、**不注入模型上下文**）。
 
-- `/goal <text>`：**自适应**——模型先判断信息是否足够（可判定成功标准 / 验证方法 / 范围边界 / 停止条件）：够 → 自动结构化后 `create`；不够 → 访谈（一次一问、≤6 问），问全再 `create`。
-- `/goal`（无参）/ `status` / `show`：报告当前目标。
-- `/goal pause` / `resume` / `clear`：**在 `execute` 里确定性处理**（不经模型）。
-- 实现：`ctx.command.transform(e => e.add({ name, description, execute }))`；`execute({ sessionID, prompt, delivery })` 里判断子命令 → 服务端处理；否则**用 `synthetic({ text: goalCommandPrompt(...), description: "Goal request · <objective>", resume: true })` 转发给模型**。**不用 `ctx.session.prompt`**：那条会落成 User 消息，整段 prompt 会直接刷满 TUI 转录（见 §8 投递方式）。
+| 命令 | 行为 |
+| --- | --- |
+| `/goal <目标>` | **自适应**：模型先判断信息是否足够（可判定成功标准 / 验证方法 / 范围边界 / 停止条件）：够 → 自动结构化后 `create`；不够 → 访谈（一次一问、≤6 问），问全再 `create` |
+| `/goal`（无参） | 报告当前目标 |
+| `/goal-status` | 报告当前目标（服务端） |
+| `/goal-pause` | 暂停 active 目标（服务端） |
+| `/goal-resume` | 恢复 paused / blocked / budget-limited 目标（服务端） |
+| `/goal-clear` | 删除目标记录（服务端） |
+
+- 实现：`ctx.command.transform(e => e.add({ name, description, execute }))`，逐个注册；`/goal <目标>` **用 `synthetic({ text: goalCommandPrompt(...), description: "Goal request · <objective>", resume: true })` 转发给模型**。**不用 `ctx.session.prompt`**：那条会落成 User 消息，整段 prompt 会直接刷满 TUI 转录（见 §8 投递方式）。
 - `/goal-debug env | events | sessions | state`：**确定性只读诊断**（本实例 location / 会话归属判定 / 最近事件环 / 全部 goal 记录 / 本会话轮状态），输出走 `synthetic(resume:false)`，不唤醒模型。与业务命令分开，避免调试标记污染正常面。
 
 ## 5. 工具面（单一 `goal` + op）
@@ -92,7 +98,7 @@ goal({
 | 状态 | 谁设 | 规则 |
 | --- | --- | --- |
 | `active` | 创建 / resume | — |
-| `paused` | 用户命令 / 系统 | `/goal pause` 或中断 |
+| `paused` | 用户命令 / 系统 | `/goal-pause` 或中断 |
 | `blocked` | **服务端裁决**（模型只报告） | §7 |
 | `budget-limited` | 系统 | 记账后 tokens ≥ 预算 |
 | `complete` | 模型 | 证据审计通过 |
@@ -148,7 +154,7 @@ goal({
   - `version`、`goalId`、`objective`（**含 >4000 全文**）、`status`、`tokenBudget`、`tokensUsed`、`usage`（分项 `input`/`output`/`reasoning`/`cacheRead`/`cacheWrite`，0.1.1 起；`tokensUsed` = 五项之和）、`timeUsedSeconds`、`blockerKey`、`blockerText`、`blockerStreak`、`emptyStreak`、`lastContinuationAt`、`createdAt`、`updatedAt`。
   - **记账时机**：`step.ended` 只累加进内存，**轮末**（`execution.succeeded`/`failed`）或中断时一次性落账 —— 否则收尾轮（状态翻成 complete/blocked/budget-limited 之后仍在进行的 step）会被漏记。
   - "会话文件 + 目标引用文件"合并为同一条。
-- **清理**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal clear` 同。`complete/paused/blocked/budget-limited` 保留。（**注意**：`session.deleted` 的 payload **不带 `location`**，归属判定必须豁免它，否则事件被判「不属于本实例」丢弃、记录永久残留；见 gotchas §8.2。）
+- **清理**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal-clear` 同。`complete/paused/blocked/budget-limited` 保留。（**注意**：`session.deleted` 的 payload **不带 `location`**，归属判定必须豁免它，否则事件被判「不属于本实例」丢弃、记录永久残留；见 gotchas §8.2。）
 - **启动 reconcile**：`storage.scan({prefix:"goal:"})` 得本地 ID；用 `ctx.session.get(id)` 判活；不存在且 `updatedAt` 超 `reconcile_guard_minutes`（默认 5）→ remove。查不到/出错一律跳过、不删。只启动跑一次。（**实现偏差已修**：判「不存在」必须认 `Schema.TaggedError` 的 `_tag`（`Session.NotFoundError` / `SchemaError`）——插件侧错误**没有** `status`，按 404 判永远不成立；见 `plugin-dev-gotchas.md` §8.1。）
 
 ## 11. 配置项（`ctx.options`）

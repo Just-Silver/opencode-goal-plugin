@@ -2,35 +2,22 @@ import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
 import { createGoal, pause } from "../model/goal"
 import { createRepository, type Repository, type StorageLike } from "../store/repository"
-import { createCommandHandler, parseGoalCommand } from "./commands"
+import { createCommandHandlers, parseGoalCommand } from "./commands"
 import type { GoalDeps } from "./deps"
 
 describe("parseGoalCommand", () => {
-  test("recognizes the deterministic subcommands case-insensitively", () => {
-    expect(parseGoalCommand("pause")).toEqual({ kind: "pause" })
-    expect(parseGoalCommand("  RESUME ")).toEqual({ kind: "resume" })
-    expect(parseGoalCommand("clear")).toEqual({ kind: "clear" })
-  })
-
-  test("blank or status/show reports the goal", () => {
+  test("blank reports the goal", () => {
     expect(parseGoalCommand("")).toEqual({ kind: "status" })
-    expect(parseGoalCommand("status")).toEqual({ kind: "status" })
-    expect(parseGoalCommand("show")).toEqual({ kind: "status" })
+    expect(parseGoalCommand("   ")).toEqual({ kind: "status" })
   })
 
-  test("everything else is treated as an objective (including an optional start/begin verb)", () => {
+  test("everything else is the objective verbatim — no reserved names", () => {
     expect(parseGoalCommand("ship the release")).toEqual({ kind: "objective", objective: "ship the release" })
-    expect(parseGoalCommand("start ship the release")).toEqual({ kind: "objective", objective: "ship the release" })
-    expect(parseGoalCommand("begin")).toEqual({ kind: "objective", objective: "begin" })
-  })
-
-  test("a bare start falls through to an objective", () => {
-    expect(parseGoalCommand("start")).toEqual({ kind: "objective", objective: "start" })
-  })
-
-  test("a reserved name ignores any trailing arguments", () => {
-    expect(parseGoalCommand("resume now")).toEqual({ kind: "resume" })
-    expect(parseGoalCommand("status please")).toEqual({ kind: "status" })
+    expect(parseGoalCommand("  ship it  ")).toEqual({ kind: "objective", objective: "ship it" })
+    // 旧写法不再被后台拦截：它们会原样作为目标文字转发给模型。
+    expect(parseGoalCommand("pause")).toEqual({ kind: "objective", objective: "pause" })
+    expect(parseGoalCommand("status")).toEqual({ kind: "objective", objective: "status" })
+    expect(parseGoalCommand("start the server")).toEqual({ kind: "objective", objective: "start the server" })
   })
 })
 
@@ -56,7 +43,7 @@ function runner(deps: GoalDeps) {
   const prompts: string[] = []
   const descriptions: string[] = []
   const notices: string[] = []
-  const handler = createCommandHandler(deps, {
+  const handlers = createCommandHandlers(deps, {
     deliver: async (input) => {
       prompts.push(input.text)
       descriptions.push(input.description)
@@ -65,11 +52,11 @@ function runner(deps: GoalDeps) {
       notices.push(text)
     },
   })
-  return { handler, prompts, descriptions, notices }
+  return { handlers, prompts, descriptions, notices }
 }
 
-function makeHandler() {
-  const deps: GoalDeps = {
+function makeDeps(): GoalDeps {
+  return {
     repo: createRepository(memoryStorage()),
     options: { ...DEFAULT_OPTIONS },
     now: () => 1000,
@@ -78,83 +65,91 @@ function makeHandler() {
     locationDirectory: "test-location",
     sessionDirectory: async () => "test-location",
   }
+}
+
+function makeHandler() {
+  const deps = makeDeps()
   return { deps, ...runner(deps) }
 }
 
-describe("createCommandHandler", () => {
-  test("objective text is forwarded to the model", async () => {
-    const { handler, prompts, descriptions } = makeHandler()
-    await handler({ sessionID: "ses_1", prompt: { text: "ship it" } })
+describe("createCommandHandlers", () => {
+  test("goal forwards the objective to the model", async () => {
+    const { handlers, prompts, descriptions } = makeHandler()
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: "ship it" } })
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain("ship it")
     // TUI 只显示 description 一行；整段 prompt 不该进转录。
     expect(descriptions[0]).toBe("Goal request · ship it")
   })
 
-  test("pause and resume are handled deterministically", async () => {
-    const { deps, handler, notices } = makeHandler()
+  test("an empty goal argument reports the status instead of prompting the model", async () => {
+    const { deps, handlers, notices, prompts } = makeHandler()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    await handler({ sessionID: "ses_1", prompt: { text: "pause" } })
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: "" } })
+    expect(prompts).toHaveLength(0)
+    expect(notices[0]).toContain("Goal (active)")
+  })
+
+  test("status with no goal reports that none is set", async () => {
+    const { handlers, notices } = makeHandler()
+    await handlers.status("ses_1")
+    expect(notices[0]).toContain("No goal")
+  })
+
+  test("pause and resume are handled deterministically", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    await handlers.pause("ses_1")
     expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
-    await handler({ sessionID: "ses_1", prompt: { text: "resume" } })
+    await handlers.resume("ses_1")
     expect((await deps.repo.load("ses_1"))?.status).toBe("active")
     expect(notices.some((line) => line.includes("paused"))).toBe(true)
   })
 
   test("clear removes the record", async () => {
-    const { deps, handler } = makeHandler()
+    const { deps, handlers } = makeHandler()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    await handler({ sessionID: "ses_1", prompt: { text: "clear" } })
+    await handlers.clear("ses_1")
     expect(await deps.repo.load("ses_1")).toBeUndefined()
   })
 
-  test("status with no goal reports that none is set", async () => {
-    const { handler, notices } = makeHandler()
-    await handler({ sessionID: "ses_1", prompt: { text: "" } })
-    expect(notices[0]).toContain("No goal")
-  })
-
   test("resume on a non-resumable goal reports it and leaves the status unchanged", async () => {
-    const { deps, handler, notices } = makeHandler()
+    const { deps, handlers, notices } = makeHandler()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    await handler({ sessionID: "ses_1", prompt: { text: "resume" } })
+    await handlers.resume("ses_1")
     expect(notices.some((line) => line.includes("nothing to resume"))).toBe(true)
     expect((await deps.repo.load("ses_1"))?.status).toBe("active")
   })
 
   test("pause on a non-active goal reports nothing to pause", async () => {
-    const { deps, handler, notices } = makeHandler()
+    const { deps, handlers, notices } = makeHandler()
     await deps.repo.save("ses_1", pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1))
-    await handler({ sessionID: "ses_1", prompt: { text: "pause" } })
+    await handlers.pause("ses_1")
     expect(notices.some((line) => line.includes("nothing to pause"))).toBe(true)
     expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
   })
 
-  test("pause and clear without a goal do not throw and report no goal", async () => {
-    const { handler, notices } = makeHandler()
-    await handler({ sessionID: "ses_1", prompt: { text: "pause" } })
-    await handler({ sessionID: "ses_1", prompt: { text: "clear" } })
-    expect(notices).toHaveLength(2)
+  test("status, pause and clear without a goal do not throw and report no goal", async () => {
+    const { handlers, notices } = makeHandler()
+    await handlers.status("ses_1")
+    await handlers.pause("ses_1")
+    await handlers.clear("ses_1")
+    expect(notices).toHaveLength(3)
     expect(notices.every((line) => line.includes("No goal"))).toBe(true)
   })
 
   test("status overlays the in-flight turn usage", async () => {
     const repo = createRepository(memoryStorage())
     await repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const { handler, notices } = runner({
+    const { handlers, notices } = runner({
+      ...makeDeps(),
       repo,
-      options: { ...DEFAULT_OPTIONS },
-      now: () => 1000,
-      newGoalId: () => "g1",
-      isRestricted: () => false,
-      locationDirectory: "test-location",
-      sessionDirectory: async () => "test-location",
       pendingUsage: () => ({
         tokens: { input: 100, output: 10, reasoning: 0, cacheRead: 50, cacheWrite: 0 },
         elapsedSeconds: 2,
       }),
     })
-    await handler({ sessionID: "ses_1", prompt: { text: "status" } })
+    await handlers.status("ses_1")
     expect(notices[0]).toContain("tokens 160")
     expect(notices[0]).toContain("cacheRead 50")
   })
@@ -169,16 +164,8 @@ describe("createCommandHandler", () => {
       remove: async () => {},
       listAll: async () => [],
     }
-    const { handler, notices } = runner({
-      repo,
-      options: { ...DEFAULT_OPTIONS },
-      now: () => 1000,
-      newGoalId: () => "g1",
-      isRestricted: () => false,
-      locationDirectory: "test-location",
-      sessionDirectory: async () => "test-location",
-    })
-    await expect(handler({ sessionID: "ses_1", prompt: { text: "resume" } })).rejects.toThrow("storage down")
+    const { handlers, notices } = runner({ ...makeDeps(), repo })
+    await expect(handlers.resume("ses_1")).rejects.toThrow("storage down")
     expect(notices).toHaveLength(0)
   })
 })

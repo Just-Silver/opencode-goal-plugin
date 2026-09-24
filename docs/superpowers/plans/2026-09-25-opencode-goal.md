@@ -1,6 +1,8 @@
 # opencode-goal 实现计划（v1）
 
-> ⚠️ **历史快照**：本文件记录当时的实现步骤，其中 token 记账口径（§Global Constraints 与 Task 5 的 `cost = output + reasoning + cacheWrite`）**已被 0.1.1 取代** —— 现行口径见 `docs/superpowers/specs/2026-09-24-opencode-goal-design.md` §3/§10（真实处理量，含 `cacheRead`）。以 `src/` 与 spec 为准。
+> ⚠️ **历史快照**：本文件记录当时的实现步骤，以下已被取代，以 `src/` 与 `docs/superpowers/specs/2026-09-24-opencode-goal-design.md` 为准：
+> - token 记账口径（§Global Constraints / Task 5 的 `cost = output + reasoning + cacheWrite`）→ 0.1.1 起为**真实处理量**（含 `cacheRead`），见 spec §3/§10；
+> - 命令面（§4 的 `/goal pause|resume|clear|status` 子命令）→ 0.1.1 起为**独立命令** `<name>-status` / `-pause` / `-resume` / `-clear`，见 spec §4。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

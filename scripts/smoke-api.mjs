@@ -166,7 +166,11 @@ class Events {
 
 // ---------- 通用 ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const sendGoal = (sid, text) => api("session.command", { params: { sessionID: sid }, body: { name: "goal", text } })
+// 命令名与插件 options.command_name 默认值一致；状态控制是独立命令（宿主没有子命令概念）。
+const COMMAND_NAME = "goal"
+const sendCommand = (sid, name, text = "") => api("session.command", { params: { sessionID: sid }, body: { name, text } })
+const sendGoal = (sid, text) => sendCommand(sid, COMMAND_NAME, text)
+const control = (sid, action) => sendCommand(sid, `${COMMAND_NAME}-${action}`)
 const sendPrompt = (sid, text) => api("session.prompt", { params: { sessionID: sid }, body: { text, resume: true } })
 const sessionInfo = async (sid) => {
   const r = await api("session.get", { params: { sessionID: sid } })
@@ -193,10 +197,10 @@ const SCENARIOS = {
   commands: {
     title: "命令面：无目标时 status / pause / resume / clear",
     run: async (ctx) => {
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(1000)
       const m = ctx.events.mark()
-      for (const t of ["status", "pause", "resume", "clear"]) { await sendGoal(ctx.sid, t); await sleep(1200) }
+      for (const action of ["status", "pause", "resume", "clear"]) { await control(ctx.sid, action); await sleep(1200) }
       await sleep(2500)
       const receipts = ctx.receipts(m)
       check(receipts.length >= 4, `应有 4 条回执，实际 ${receipts.length}`)
@@ -217,10 +221,10 @@ const SCENARIOS = {
       const done = await ctx.waitStatus(["complete", "blocked", "budget-limited"], 180000)
       check(done?.status === "complete", `应 complete，实际 ${done?.status}`)
       const m2 = ctx.events.mark()
-      await sendGoal(ctx.sid, "status")
+      await control(ctx.sid, "status")
       await sleep(1500)
       check(ctx.receipts(m2).some((d) => /^Goal \(/.test(d)), "status 回执应报告目标状态")
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(2000)
       check(!(await ctx.goal()), "clear 后 KV 记录应消失")
       ctx.log(`回执：${ctx.receipts(m).slice(0, 1)}`)
@@ -237,11 +241,11 @@ const SCENARIOS = {
       check(blocked, "应进入 blocked")
       check(blocked.blockerStreak >= 3, `blockerStreak 应 >= 3，实际 ${blocked.blockerStreak}`)
       check(blocked.blockerKey === "smoke-blocker", `blockerKey 应为 smoke-blocker，实际 ${blocked.blockerKey}`)
-      await sendGoal(ctx.sid, "resume")
+      await control(ctx.sid, "resume")
       const active = await ctx.waitStatus("active", 30000)
       check(active, "resume 后应 active")
       check(active.blockerStreak === 0, `resume 应把 streak 归零，实际 ${active.blockerStreak}`)
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(1500)
     },
   },
@@ -256,7 +260,7 @@ const SCENARIOS = {
       check(g, "应进入 budget-limited")
       check(g.tokenBudget === 1, `tokenBudget 应为 1，实际 ${g.tokenBudget}`)
       check(g.tokensUsed > 0, `tokensUsed 应 > 0，实际 ${g.tokensUsed}`)
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(1500)
     },
   },
@@ -275,7 +279,7 @@ const SCENARIOS = {
       check(paused, "中断后应 paused")
       const evSeen = await waitFor("interrupted-event", () => (ctx.evCount("session.execution.interrupted", ctx.mark0) >= 1 ? true : undefined), { timeout: 10000, interval: 1000 })
       check(evSeen, "应有 session.execution.interrupted 事件")
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(1500)
     },
   },
@@ -294,7 +298,9 @@ const SCENARIOS = {
       ctx.log(`execution.succeeded=${succeeded}  auto-continue 回执=${cont}`)
       check(succeeded >= 2, `应至少 2 轮，实际 ${succeeded}（模型可能单轮做完）`)
       check(cont >= 1, `应至少 1 条 auto-continue 回执，实际 ${cont}`)
-      await sendGoal(ctx.sid, "clear")
+      // 每轮结束最多投 1 条续跑：> 轮数说明同 location 有多实例/旧激活重复投递（回归护栏）。
+      check(cont <= succeeded, `auto-continue 回执 ${cont} 超过轮数 ${succeeded}（多实例重复投递回归）`)
+      await control(ctx.sid, "clear")
       await sleep(1500)
     },
   },
@@ -307,7 +313,7 @@ const SCENARIOS = {
       await sendGoal(ctx.sid, "在当前目录创建一个 smoke-conflict.txt，内容写 ok。")
       const rec = await ctx.waitStatus(["active", "complete"], 90000)
       check(rec, "应先有一个目标")
-      await sendGoal(ctx.sid, "pause")
+      await control(ctx.sid, "pause")
       const paused = await ctx.waitStatus("paused", 30000)
       check(paused, "应能 pause 成未关闭状态")
       await sendPrompt(ctx.sid, "调用 goal 工具 op=create，objective 写 第二个目标。")
@@ -315,7 +321,7 @@ const SCENARIOS = {
       const exp = await sessionExport(ctx.sid)
       const text = JSON.stringify(exp)
       check(text.includes("already open"), "转录里应出现 already open 的拒绝")
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(1500)
     },
   },
@@ -332,7 +338,7 @@ const SCENARIOS = {
       // 注意：模型可能压缩目标，所以只要求「明显偏长」；插件侧不做截断（KV 存全文）。
       ctx.log(`objective 长度 = ${g.objective.length}（模型可能压缩）`)
       check(g.objective.length >= 3000, `KV 里 objective 应明显偏长，实际 ${g.objective.length}`)
-      await sendGoal(ctx.sid, "clear")
+      await control(ctx.sid, "clear")
       await sleep(1500)
     },
   },
@@ -399,7 +405,7 @@ const ctxBase = {
   goal: async (sid = sessionID) => (await readGoals(sid))[0]?.goal,
   receipts: (from) => events.descriptions(from, sessionID),
   evCount: (type, from) => events.count(type, from, sessionID),
-  clearGoal: async () => { await sendGoal(sessionID, "clear").catch(() => {}); await sleep(1500) },
+  clearGoal: async () => { await control(sessionID, "clear").catch(() => {}); await sleep(1500) },
   waitStatus: async (want, timeout) => {
     const wants = Array.isArray(want) ? want : [want]
     return waitFor("status", async () => {

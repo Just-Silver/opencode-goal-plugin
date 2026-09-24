@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin"
 import { resolveOptions } from "./config"
-import { createCommandHandler } from "./host/commands"
+import { createCommandHandlers } from "./host/commands"
 import { createContinuation } from "./host/continuation"
 import { createDebug } from "./host/debug"
 import type { GoalDeps } from "./host/deps"
@@ -56,15 +56,35 @@ export default {
     routerRef = router
     const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
 
-    // 命令：保留名服务端确定性处理；其余转发给模型。调试命令只读、零 token、不走模型。
+    // 命令：`/goal <目标>` 转发给模型；状态控制是**独立命令**（宿主没有子命令概念，
+    // 后台拦截保留名会让用户打错一个字就变成目标文字）。全部零 token、不走模型。
     ctx.command.transform((editor) => {
+      const handlers = createCommandHandlers(deps, { deliver, notify })
+      const name = options.commandName
       editor.add({
-        name: options.commandName,
-        description: "Set, inspect, pause, resume, or clear the persistent goal.",
-        execute: async (input) => {
-          const handler = createCommandHandler(deps, { deliver, notify })
-          await handler({ sessionID: input.sessionID, prompt: { text: input.prompt.text } })
-        },
+        name,
+        description: "Set a persistent goal for this session (empty reports the current goal).",
+        execute: async (input) => handlers.goal({ sessionID: input.sessionID, prompt: { text: input.prompt.text } }),
+      })
+      editor.add({
+        name: `${name}-status`,
+        description: "Report the current goal.",
+        execute: async (input) => handlers.status(input.sessionID),
+      })
+      editor.add({
+        name: `${name}-pause`,
+        description: "Pause the active goal.",
+        execute: async (input) => handlers.pause(input.sessionID),
+      })
+      editor.add({
+        name: `${name}-resume`,
+        description: "Resume a paused, blocked, or budget-limited goal.",
+        execute: async (input) => handlers.resume(input.sessionID),
+      })
+      editor.add({
+        name: `${name}-clear`,
+        description: "Clear the goal record.",
+        execute: async (input) => handlers.clear(input.sessionID),
       })
       editor.add({
         name: options.debugCommandName,

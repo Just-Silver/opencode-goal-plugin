@@ -42,7 +42,7 @@
 | `empty_threshold` | 3 | 连续空转多少轮算「空转」 |
 | `reconcile_guard_minutes` | 5 | 启动兜底保护窗（分钟） |
 | `restricted_agents` | `["plan"]` | 受限 agent（拒创建 / 续跑 / resume） |
-| `command_name` | `goal` | 主命令名 |
+| `command_name` | `goal` | 主命令名；状态控制是派生命令 `<name>-status` / `-pause` / `-resume` / `-clear` |
 | `debug_command_name` | `goal-debug` | 调试命令名 |
 | `debug` | `true` | 注册只读调试工具 `goal_debug`（设 `false` 可让模型工具表保持干净） |
 

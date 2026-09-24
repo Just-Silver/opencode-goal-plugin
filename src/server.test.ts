@@ -104,7 +104,15 @@ describe("server", () => {
     env.store.set("goal:ses_orphan", ORPHAN)
 
     const cleanup = await plugin.setup(env.ctx as never)
-    expect(env.commands[0]?.name).toBe("goal")
+    // 命令面：只有 `/goal <目标>` 会转发给模型；状态控制是独立命令（宿主没有子命令概念）。
+    expect(env.commands.map((command) => command.name)).toEqual([
+      "goal",
+      "goal-status",
+      "goal-pause",
+      "goal-resume",
+      "goal-clear",
+      "goal-debug",
+    ])
     expect(env.tools[0]?.name).toBe("goal")
     // 直连工具：不进 Code Mode 目录（否则模型要写 JS 才能调）。
     expect(env.tools[0]?.options?.codemode).toBe(false)
@@ -159,13 +167,13 @@ describe("server", () => {
     if (typeof cleanup === "function") await cleanup()
   })
 
-  test("a deterministic subcommand notifies without waking a model turn", async () => {
+  test("the status command notifies without waking a model turn", async () => {
     const env = mockCtx(missing)
     const cleanup = await plugin.setup(env.ctx as never)
-    const command = env.commands[0]
+    const command = env.commands.find((item) => item.name === "goal-status")
     expect(command).toBeDefined()
 
-    await command!.execute({ sessionID: "ses_1", prompt: { text: "status" } })
+    await command!.execute({ sessionID: "ses_1", prompt: { text: "" } })
 
     expect(env.synthetic).toHaveLength(1)
     expect(env.synthetic[0]).toMatchObject({ sessionID: "ses_1", resume: false })
@@ -196,7 +204,7 @@ describe("server", () => {
   test("the debug command reports its rendered output to the transcript", async () => {
     const env = mockCtx(missing)
     const cleanup = await plugin.setup(env.ctx as never)
-    const command = env.commands[1]
+    const command = env.commands.find((item) => item.name === "goal-debug")
     expect(command?.name).toBe("goal-debug")
 
     await command!.execute({ sessionID: "ses_1", prompt: { text: "env" } })

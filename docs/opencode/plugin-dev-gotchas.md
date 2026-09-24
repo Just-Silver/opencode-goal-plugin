@@ -239,7 +239,7 @@ async function belongsToThisLocation(sessionID: string) {
 
 ## 5. 其它已验证的约束
 
-- **`ctx.session.synthetic` 必须 `resume: false`**：否则确定性子命令（如 `/goal status`）会唤醒一轮模型。出处：`packages/core/src/plugin/plan.ts` 同样用法。
+- **`ctx.session.synthetic` 必须 `resume: false`**：否则确定性命令（如 `/goal-status`）会唤醒一轮模型。出处：`packages/core/src/plugin/plan.ts` 同样用法。
 - **续跑 agent 未知时保守跳过**，绝不回退成 `"build"`（否则会把受限 agent 放行）。
 - **`session.execution.interrupted` → `paused`**（宿主给定信号，非启发式）。
 - **`.gitignore` 别用 Visual Studio 模板**：其 NuGet 规则 `**/[Pp]ackages/*` 会静默吞掉 `docs/**/sources/packages/**` 归档（本项目曾因此漏提交 44 个文件）。TS/Bun 项目用 `Node` 模板。
@@ -252,7 +252,7 @@ async function belongsToThisLocation(sessionID: string) {
 
 ## 6. 命令 / 工具的输出怎么"显示给人"
 
-**现象**：`/goal-debug env` 执行了，会话里也确实多了一条消息，但用户在 TUI 里**什么都看不到**（业务命令 `/goal status`、`/goal pause` 的回执同样不可见）。
+**现象**：`/goal-debug env` 执行了，会话里也确实多了一条消息，但用户在 TUI 里**什么都看不到**（业务命令 `/goal-status`、`/goal-pause` 的回执同样不可见）。
 
 **根因（出处）**：
 - `CommandDefinition.execute` 返回 `Promise<void>`（`packages/plugin/src/promise/command.ts`；宿主侧 `packages/core/src/command.ts` 的 `Definition.execute` 返回 `Effect.Effect<void, unknown>`）——**命令没有"返回值"通道**，不能像 CLI 那样 `return "文本"` 让前端打印。
