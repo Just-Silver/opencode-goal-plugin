@@ -2,7 +2,88 @@
 
 > 只记**已定位、暂缓修复**的问题。每条要写清：现象 / 根因（含出处）/ 影响 / 建议修法 / 怎么验证。修完就删条目。
 
-（本仓库自身当前没有已定位但暂缓的问题。）
+### [ ] `/goal-debug events` 的时间戳按 UTC 显示，与本地时间差一个时区
+
+**现象**：`/goal-debug events` 打出的时间（如 `22:49:48.312`）与用户本地墙钟 / TUI 看到的时间对不上（本机 UTC+8，差 8 小时）。
+
+**根因**：`src/host/debug.ts` 的 `clock(ms)` 用 `new Date(ms).toISOString().slice(11, 23)` —— `toISOString()` 是 **UTC**；而 `ms` 来自 `deps.now()`（`Date.now()`，epoch，本身无时区）。宿主日志同样以 UTC（带 `Z`）打印，所以两者一致、但与本地时间差 8 小时。
+
+**影响**：纯只读诊断的显示误导；不影响任何业务判定。
+
+**建议修法**：按本地时间渲染（`toLocaleTimeString` / 手动加时区偏移），或显式在行首标注 `UTC`。
+
+**验证**：触发任意事件后，对比 `/goal-debug events` 的显示与同一条事件在 `~/.local/share/opencode/log/opencode.log`（UTC，带 `Z`）里的时间。
+
+---
+
+### [ ] 插件热重载后模型解析失败 → 该轮 drain 失败、自动续跑不触发（宿主 bug）
+
+**现象**：改动 `src/**`（或任何触发插件热重载的操作）时，若正好有会话在跑一轮，该轮以 `Failed to drain Session` 失败，且**不再自动续跑**（goal 停在 `active`、`tokensUsed=0`）。用户会误以为「新插件坏了、不续轮了」。
+
+**根因（宿主 bug，非本插件）**：opencode 插件热重载后模型注册表短暂失效。服务端日志（`~/.local/share/opencode/log/opencode.log`）实证：
+
+```
+level=ERROR message="Failed to drain Session"
+cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/deepseek-v4.1-flash"
+```
+
+对应上游 open issue：#47114（plugin hot-reload 后 provider 回落/401）、#51128（reload during a turn → step retry 失败、`Model unavailable`）。注意：该错误在本插件的代际守卫**引入之前**（日志 23:19 / 23:29）就已出现，与本插件无关。
+
+**影响**：开发期高频热重载时，正在跑的轮次失败、续跑中断；通常**自愈**（下一次 location boot 恢复），持续不恢复需重启服务。
+
+**规避**：不要在会话正跑一轮时热重载插件；改 `src/**` 前先等轮次结束。
+
+**验证**：热重载后立刻重跑 `bun scripts/smoke-api.mjs --session <sid> --scenario continuation`；若 `PASS`（比值 1）说明模型已恢复、续跑正常。
+
+---
+
+### [ ] 同一 location 存在多个存活插件激活 → 自动续跑被重复投递 N 倍
+
+**现象**：跨轮续跑时，**一次 `session.execution.succeeded` 会投递 N 条 `Goal auto-continue`**（真机实测：每轮 3~6 条；截图里模型自述「本轮收到了 5 条 Continue 提示」）。`session.inbox.enqueued` 里 N 条内容相同、时间差 1–2ms。
+
+**根因（已确认，宿主 bug：`location.reload` 在 location 活跃时不关闭旧服务图）**：
+
+- `opencode reload` → `LocationServiceMap.reload()`（`packages/core/src/location-service-map.ts`）：`RcMap.invalidate(ref)` 后重建。
+- Effect `RcMap.invalidate`（`effect/src/internal/rcMap.ts`）：
+
+  ```js
+  const entry = o.value
+  MutableHashMap.remove(self.state.map, key)
+  if (entry.refCount > 0) return          // ★ 有活引用就只摘键、不关闭
+  yield* core.scopeClose(entry.scope, core.exitVoid)
+  ```
+
+  即：**location 只要还有活引用（refCount>0，例如该会话正在跑一轮），`invalidate` 就不关闭旧图**。旧图里的 `Plugin.Service` → 插件激活 → `setup` 的 cleanup **永远不会被调用** → 那条订阅全局事件流的循环继续跑 ⇒ 幽灵激活。
+
+**决定性证据（2026-09-25，隔离探针，未改 `src`）**：在临时目录放一个只写日志的探针插件（`setup`/`cleanup`/收事件），临时加入全局配置后：
+
+- **空闲 location**：reload 时旧实例被正常 `cleanup`。
+- **正在跑一轮的 location（D）**：reload 时 **只新增 setup、没有对应 cleanup**；该旧实例随后**仍收到 `session.execution.*` 事件**：
+
+  ```
+  MARK RELOAD WHILE RUNNING
+  cleanup 99iyvj loc=C:\Users\13178            ← 空闲，正常关
+  cleanup x0yvc0 loc=E:\...opencode-goal       ← 空闲，正常关
+  cleanup wwjjcg loc=...oc-leak-probe          ← 空闲，正常关
+  setup   mmr066 ...
+  setup   l9bmlx ...
+  setup   ndy8uh ...
+  setup   l0tpb9 loc=D:\下载\Goal冒烟          ← D 只新增，没有 cleanup e40c0o！
+  ```
+
+- **对照实验**：探针 `cleanup` 里 `abort.abort()` 时，被 cleanup 的旧实例之后收到 **0** 个事件；不 abort 的版本则继续收事件。**证明：宿主一旦调用 cleanup，我们插件的 `abort.abort()` 能真正停掉循环。**
+
+**结论：是宿主（opencode）的 bug，不是本插件的问题。** 我们插件的清理逻辑是正确的；只在宿主不调用 cleanup（location 活跃时 reload）时被动受害。任何"好插件"都会同样中招。
+
+**影响**：开发期高频 reload（改配置/改插件文件）且此时有会话在跑 → 幽灵激活累积 → 续跑 N 倍、token 翻倍、内存增长。普通用户偶发。
+
+**建议修法**：
+1. **插件侧兜底（推荐）**：进程级共享 `globalThis[Symbol.for("opencode-goal.active")]`，按 `locationDirectory` 记「当前代际 + AbortController」。`setup` 时先 `abort()` 同 location 的上一代，并让**事件循环与 hook 回调先校验自己仍是当前代际**，否则 no-op。这样即使宿主不调 cleanup，新实例也能把旧幽灵循环按停、旧实例的内存随之可回收。`globalThis` 跨模块实例共享、单线程无竞态，优于共享 KV。
+2. **上游报告**：`LocationServiceMap.reload()` 在 `refCount>0` 时未释放旧 location 图；reload 应强制关闭旧作用域（或等待其引用释放）。
+
+**验证命令**：`bun scripts/smoke-api.mjs --session <sid> --scenario continuation`，比值 `auto-continue 回执 / execution.succeeded` 应 ≈ 1。冒烟断言已补 `cont <= succeeded` 卡 N 倍回归。最稳的复现：**在会话正跑一轮时 `opencode reload`**。
+
+---
 
 > 已修的历史条目看 git 历史；对应的踩坑与实测方法沉淀在 `plugin-dev-gotchas.md` §8（会话删除事件 + 插件侧错误形状）。
 

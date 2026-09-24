@@ -5,6 +5,7 @@ import { createContinuation } from "./host/continuation"
 import { createDebug } from "./host/debug"
 import type { GoalDeps } from "./host/deps"
 import { createEventRouter, type EventLike, type EventRouter } from "./host/events"
+import { acquireGeneration } from "./host/generation"
 import { createCompactionHook, createContextHook } from "./host/hooks"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
@@ -20,6 +21,9 @@ export default {
   async setup(ctx: Plugin.Context) {
     const options = resolveOptions(ctx.options)
     const repo = createRepository(ctx.storage)
+    // 进程级代际：同 location 的新一代会 abort 上一代（宿主在 location 活跃时 reload 不会调旧代
+    // 的 cleanup，旧代的事件订阅会泄漏，续跑被重复投递 N 倍且内存只增不减）。见 known-issues。
+    const generation = acquireGeneration(ctx.location.directory)
     // 事件路由稍后才建；先留引用，让工具/命令在展示时能叠加「轮内尚未落账的用量」。
     let routerRef: EventRouter | undefined
     const deps: GoalDeps = {
@@ -133,15 +137,19 @@ export default {
       }
     })
 
-    // 钩子：常态轻量提醒 + 压缩快照
-    ctx.session.hook("context", createContextHook(deps))
-    ctx.session.hook("compaction", createCompactionHook(deps))
+    // 钩子：常态轻量提醒 + 压缩快照。陈旧代际（被 reload 顶替、宿主未调 cleanup 的旧激活）
+    // 一律 no-op，避免旧图若仍被引用时注入过期上下文。
+    const contextHook = createContextHook(deps)
+    const compactionHook = createCompactionHook(deps)
+    ctx.session.hook("context", (input) => (generation.isCurrent() ? contextHook(input) : Promise.resolve()))
+    ctx.session.hook("compaction", (input) => (generation.isCurrent() ? compactionHook(input) : Promise.resolve()))
 
-    // 事件：记账、轮边界、空闲续跑、会话删除
-    const abort = new AbortController()
+    // 事件：记账、轮边界、空闲续跑、会话删除。signal 来自代际：被新一代顶替时宿主会关闭旧订阅。
     void (async () => {
       try {
-        for await (const event of ctx.event.subscribe({ signal: abort.signal })) {
+        for await (const event of ctx.event.subscribe({ signal: generation.signal })) {
+          // 顶替后不再处理任何事件（abort 与订阅关闭之间可能还有一条已在途的事件）。
+          if (!generation.isCurrent()) break
           // 单个事件失败只记录并继续：否则一次 handle 拒绝会静默终止整条事件循环。
           try {
             await router.handle(event as unknown as EventLike)
@@ -175,7 +183,7 @@ export default {
     }).catch(() => undefined)
 
     return () => {
-      abort.abort()
+      generation.release()
     }
   },
 } satisfies Plugin.Plugin
