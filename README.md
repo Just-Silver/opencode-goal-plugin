@@ -37,7 +37,8 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 要点：
 
 - **本地插件必须指向"目录"**，不能指向文件——宿主会对文件路径打印 `configured plugin path must be a directory` 并把该项**丢弃**。
-- 该目录需有宿主可解析的入口：本仓库已提供 `"main": "./src/server.ts"`（Bun 的**目录**解析认 `main`/`index`，`exports` 不参与目录解析）。
+- 该目录需有宿主可解析的入口：**根目录的 `server.ts`**（宿主对本地目录依次找 `<目录>/server`、`<目录>/index`；本仓库已提供 `server.ts` 转发到 `src/server.ts`。`main`/`exports` 都**不**参与这条解析路径）。
+- 该入口缺失时插件会被**静默丢弃**（无任何告警），`opencode plugin list` 里也看不到。
 - 也可写成 `"file:///E:/Code/Projects/Agent/opencode-goal"`（等价）；以 `./` `../` 开头的相对路径相对**配置文件所在目录**解析。
 
 `options` 见下。

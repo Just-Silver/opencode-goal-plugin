@@ -103,7 +103,7 @@ README.md             安装与使用
 }
 ```
 
-> **执行期修订（2026-09-25，真机安装验证）**：`Host.resolve({directory})` 解析**本地插件目录**时走 **Bun 的目录解析**（认 `main`/`index`），**`exports` 不参与**——只有 `exports` 时解析失败、插件被**静默丢弃**（`entrypoints.server` 为空 → `scan()` 直接 `return []`），故补 `"main": "./src/server.ts"`。而 **git/npm 安装**路径相反：宿主用「包名 + `exports` 子路径」（`opencode-goal/server`）解析，`main` 不参与。两条路径均已实测通过（本地目录 / `git+file://…#<sha>` 安装 + 复刻 `Host.resolve` 三步）。另外：配置安装的**本地目标必须是目录**，指向文件会被打印 `configured plugin path must be a directory` 并丢弃。
+> **执行期修订（2026-09-25，真机安装验证）**：`Host.resolve({directory})` 对**本地插件目录**依次尝试 `<目录>/server`、`<目录>/index`（`packages/plugin/src/host.ts` 的 `path.resolve(directory, subpath || "index")`）——**`main` 与 `exports` 都不参与这条路径**。两者都缺时 `entrypoints.server` 为空，`ConfigPluginSource.scan()` 会**静默** `return []`（无告警、`opencode plugin list` 也不显示）。故补**根目录 `server.ts`**（`export { default } from "./src/server"`）。**git/npm 安装**路径不同：宿主用「包名 + `exports` 子路径」（`opencode-goal/server`）解析。另外：配置安装的**本地目标必须是目录**，指向文件会被打印 `configured plugin path must be a directory` 并丢弃。两条路径均已实测。
 
 - [ ] **Step 2: 创建 `tsconfig.json`**
 
