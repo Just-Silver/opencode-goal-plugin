@@ -29,7 +29,7 @@ Codex/OMP 风格的持久目标能力，用于 OpenCode V2：`/goal` 命令 + `g
 
 - **git 安装走 `exports`**（`"./server"` → `./src/server.ts`）；**本地目录安装走 `<dir>/server`** —— 两条解析路径不同，改动入口时要两边都照顾。
 - `package.json` 的 `"files": ["src"]` 生效：缓存副本里只有 `src/` + `package.json`/`README.md`/`LICENSE`，**根目录的 `server.ts` 不在**（git 安装不需要它）。
-- **Windows**：未钉版本的 git 源在冷启动做更新检查时会 spawn `git ls-remote` 且未加 `CREATE_NO_WINDOW` → **弹出可见的控制台窗口**（上游问题）。Pin 到 40 位 commit SHA 可跳过该检查。
+- **Windows**：未钉版本的 git 源在冷启动做更新检查时会 spawn `git ls-remote` 且未加 `CREATE_NO_WINDOW` → **弹出可见的控制台窗口**（上游问题 <https://github.com/anomalyco/opencode/issues/50868>，跟踪见 `docs/opencode/known-issues.md` 的「上游问题跟踪」）。Pin 到 40 位 commit SHA 可跳过该检查。
 - 改名/改 ref 才会重新克隆：**同名 spec（含 ref）会命中旧缓存**，代码改了也不重拉（需清 `<cache>/npm/git-*` 或换 ref）。
 
 ### 本地目录安装（开发用）
