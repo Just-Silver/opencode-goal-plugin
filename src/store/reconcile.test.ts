@@ -62,4 +62,22 @@ describe("reconcile", () => {
     expect(result.removed).toEqual([])
     expect(await repo.load("ses_live")).toBeDefined()
   })
+
+  test("returns an empty result when listing throws", async () => {
+    const base = createRepository(memoryStorage())
+    await base.save("ses_old", createGoal({ goalId: "g1", objective: "o", now: now - guardMs - 1 }))
+    const repo = { ...base, listAll: async () => { throw new Error("scan down") } }
+    const result = await reconcile({ repo, sessionExists: async () => false, guardMs, now })
+    expect(result.removed).toEqual([])
+    expect(await base.load("ses_old")).toBeDefined()
+  })
+
+  test("keeps a record when remove throws and keeps going", async () => {
+    const base = createRepository(memoryStorage())
+    await base.save("ses_old", createGoal({ goalId: "g1", objective: "o", now: now - guardMs - 1 }))
+    const repo = { ...base, remove: async () => { throw new Error("kv down") } }
+    const result = await reconcile({ repo, sessionExists: async () => false, guardMs, now })
+    expect(result.removed).toEqual([])
+    expect(await base.load("ses_old")).toBeDefined()
+  })
 })

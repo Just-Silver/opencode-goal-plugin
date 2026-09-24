@@ -17,6 +17,7 @@ export async function reconcile(options: ReconcileOptions): Promise<{ removed: r
   try {
     all = await options.repo.listAll()
   } catch {
+    // 失败不删（宁可留，不可误删）
     return { removed }
   }
   for (const item of all) {
@@ -25,6 +26,7 @@ export async function reconcile(options: ReconcileOptions): Promise<{ removed: r
     try {
       alive = await options.sessionExists(item.sessionID)
     } catch {
+      // 失败不删（宁可留，不可误删）
       continue
     }
     if (alive) continue
