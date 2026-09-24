@@ -34,7 +34,7 @@ src/
     goal.ts        生命周期转换 + 校验（objective 长度、op、已关闭不可重开）
     blocked.ts     blocker_key 归一化 + 连续轮计数
     empty.ts       空转判定（empty_final && !has_activity）
-    usage.ts       delta 记账（output+reasoning+cacheWrite，排除 cacheRead）+ 墙钟
+    usage.ts       delta 记账（input+output+reasoning+cacheRead+cacheWrite = 真实处理量）+ 墙钟
     limits.ts      预算命中 → budget-limited
     tool-args.ts   工具 schema/参数校验（纯）
   store/           基于 ctx.storage
@@ -145,7 +145,8 @@ goal({
 
 - **存储**：官方 **`ctx.storage`**（持久 KV，SQLite 后端，按插件 ID 命名空间隔离）。
 - **每会话一条记录**：key `goal:<sessionID>`，value 为 JSON：
-  - `version`、`goalId`、`objective`（**含 >4000 全文**）、`status`、`tokenBudget`、`tokensUsed`、`timeUsedSeconds`、`blockerKey`、`blockerStreak`、`autoTurns`、`lastContinuationAt`、`updatedAt`。
+  - `version`、`goalId`、`objective`（**含 >4000 全文**）、`status`、`tokenBudget`、`tokensUsed`、`usage`（分项 `input`/`output`/`reasoning`/`cacheRead`/`cacheWrite`，0.1.1 起；`tokensUsed` = 五项之和）、`timeUsedSeconds`、`blockerKey`、`blockerText`、`blockerStreak`、`emptyStreak`、`lastContinuationAt`、`createdAt`、`updatedAt`。
+  - **记账时机**：`step.ended` 只累加进内存，**轮末**（`execution.succeeded`/`failed`）或中断时一次性落账 —— 否则收尾轮（状态翻成 complete/blocked/budget-limited 之后仍在进行的 step）会被漏记。
   - "会话文件 + 目标引用文件"合并为同一条。
 - **清理**：`session.deleted` → `storage.remove("goal:<id>")`；`/goal clear` 同。`complete/paused/blocked/budget-limited` 保留。（**注意**：`session.deleted` 的 payload **不带 `location`**，归属判定必须豁免它，否则事件被判「不属于本实例」丢弃、记录永久残留；见 gotchas §8.2。）
 - **启动 reconcile**：`storage.scan({prefix:"goal:"})` 得本地 ID；用 `ctx.session.get(id)` 判活；不存在且 `updatedAt` 超 `reconcile_guard_minutes`（默认 5）→ remove。查不到/出错一律跳过、不删。只启动跑一次。（**实现偏差已修**：判「不存在」必须认 `Schema.TaggedError` 的 `_tag`（`Session.NotFoundError` / `SchemaError`）——插件侧错误**没有** `status`，按 404 判永远不成立；见 `plugin-dev-gotchas.md` §8.1。）
@@ -211,4 +212,5 @@ TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`�
 - **2026-09-25（多实例修复）**：promise 版插件的 `ctx.event.subscribe()` 订阅的是**跨所有 location** 的全局事件流（OpenAPI：*"across all server locations"*），而宿主**为每个 location 各加载一份**本插件（官方文档：`ctx.location` 是本实例的 location，不是它收到的事件/会话的 location）⇒ 不处理则同一会话被处理 N 次（实测续跑每轮被注入 3 条）。修复：带 `location` 的事件直接与本实例 `ctx.location.directory` 比较；不带 `location` 的 `session.execution.*` 回落到 `ctx.session.get` 查询会话目录并按会话缓存（**不可**依赖「step.started 先到」的顺序，那会在重载后漏掉第一轮）。细节见 `docs/opencode/plugin-dev-gotchas.md`。
 - **2026-09-25（调试通道）**：新增 `/goal-debug` 命令 + 只读 `goal_debug` 工具（`debug`，**默认开**）+ `events.ts` 里最近 50 条事件的归属判定环。动机：此前排查只能临时改 `goal(op="get")` 的返回值打探针，污染正常工具、且每次都要改码重载。二者定位不同：**命令不注入模型上下文**（源码：`Command.Service` 只出现在 `session/command.ts` 执行、`plugin/host.ts` 插件 API、`plugin/internal.ts` 注册，`session/system-prompt.ts` 无命令清单），只有人/被告知的 agent 可见；**工具会注入**，故 agent 自主诊断必须走工具（description 明写 `DEBUG ONLY / Do not call during normal goal work`）。
 - **2026-09-25（投递与显示修复）**：两处问题一并修。①命令回执在 TUI 不可见：`CommandDefinition.execute` 返回 `void`（无返回通道），服务端插件也没有 toast（`ctx.event` 只有 `subscribe`），唯一出口是 `session.synthetic`，而 TUI 只渲染其 **`description`**（`text` 是给模型的）⇒ 只传 `text` 会变成一行空白通知；现所有回执补 `description`。②整段内部 prompt 刷屏：`/goal <目标>` 转发与每轮续跑原先用 `ctx.session.prompt`，会落成 **User 消息**整段显示（用户截图反馈）；现改走 `synthetic({ text, description, resume: true })`——`text` 仍是模型收到的完整内容（`to-llm-message` 里 synthetic → `role: "user"`），`description` 是 TUI 唯一显示的一行摘要（`Goal request · …` / `Goal auto-continue · …`）。宿主自己的 subagent 完成通知就是这么做的。细节见 gotchas §6/§7。
+- **2026-09-25（记账口径修正，0.1.1）**：`tokenCost` 由「产出侧」（`output+reasoning+cacheWrite`）改为**真实处理量**（`input+output+reasoning+cacheRead+cacheWrite`）；并修掉**收尾轮漏记**（`step.ended` 只累加内存，轮末 / 中断时一次性落账，`accrue` 不再看状态）。记录新增可选 `usage` 分项；旧记录的 `tokensUsed` 与新口径不可比、不重算。理由：原口径漏掉 cacheRead（长会话里占 ~98%），预算形同虚设；Codex/OMP 排除 cacheRead 属「工作量」口径，与「消耗护栏」目的不符。
 - **2026-09-25（上下文注入重构）**：上一版把整段目标上下文（~3000 字符）当**消息**发出去——显示压成了一行，但**历史每轮仍在膨胀**。现改为参考实现的做法（宿主生态的 V2 版 `opencode2-goal-plugin`）：目标本体（objective + status + 预算 + 全部行为规则）由 `ctx.session.hook("context")` 追加到 **system 部分**（只存在于当次请求，不落消息、不进转录）；续跑触发只剩**一行** `Continue the active goal from its current state.`。实测每轮落库从 ~3000 字符降到 **48**，且模型仍跨 5 轮把「1~50 分批」完成（触发语里没有目标 ⇒ 反证 system 注入生效）。**呈现方式的差异**（参考实现驱动用 `session.prompt` → 普通用户消息；我们用 `synthetic` → 通知行）见 gotchas §7。同日发现的 KV 残留问题（`session.deleted` 的 schema 不带 `location` ⇒ 归属回落 `session.get` ⇒ 事件被丢弃；reconcile 又因只认 `status` 而永远探不到「不存在」）**已于同日修复并完成真机验收**：删除事件豁免归属判定 + 判「存在」改认 `_tag`。详见 `docs/opencode/plugin-dev-gotchas.md` §8。

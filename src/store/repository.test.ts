@@ -86,4 +86,27 @@ describe("repository", () => {
     expect(decodeGoal({ version: 1, goalId: "g" })).toBeUndefined()
     expect(decodeGoal(null)).toBeUndefined()
   })
+
+  test("decodeGoal keeps an optional usage breakdown", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 1 })
+    const decoded = decodeGoal({ ...goal, usage: { input: 1, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 } })
+    expect(decoded?.usage).toEqual({ input: 1, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 })
+  })
+
+  test("decodeGoal drops a malformed usage but keeps the goal", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 1 })
+    const decoded = decodeGoal({ ...goal, usage: { input: "nope" } })
+    expect(decoded).toBeDefined()
+    expect(decoded?.usage).toBeUndefined()
+    expect(decoded?.goalId).toBe("g1")
+  })
+
+  test("decodeGoal accepts a legacy record without usage", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 1 })
+    const legacy: Record<string, unknown> = { ...goal }
+    delete legacy.usage
+    const decoded = decodeGoal(legacy)
+    expect(decoded?.usage).toBeUndefined()
+    expect(decoded?.tokensUsed).toBe(0)
+  })
 })

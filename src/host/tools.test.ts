@@ -48,6 +48,22 @@ describe("createGoalTool", () => {
     expect(result.goal.objective).toBe("finish X")
   })
 
+  test("overlays the in-flight turn usage on tool results", async () => {
+    // 记账改成轮末落盘后，KV 在轮中还是旧值；工具返回必须叠加内存里的本轮 pending。
+    const deps = makeDeps({
+      pendingUsage: () => ({
+        tokens: { input: 100, output: 10, reasoning: 5, cacheRead: 50, cacheWrite: 2 },
+        elapsedSeconds: 3,
+      }),
+    })
+    const tool = createGoalTool(deps)
+    await tool.execute({ op: "create", objective: "finish X" }, ctx)
+    const result = parse(await tool.execute({ op: "get" }, ctx))
+    expect(result.goal.tokensUsed).toBe(167)
+    expect(result.goal.timeUsedSeconds).toBe(3)
+    expect(result.completionBudgetReport).toContain("tokens used 167")
+  })
+
   test("create rejects an empty objective", async () => {
     const tool = createGoalTool(makeDeps())
     await expect(tool.execute({ op: "create", objective: "  " }, ctx)).rejects.toThrow(/objective/)

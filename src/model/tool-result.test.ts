@@ -18,6 +18,18 @@ describe("buildToolResult", () => {
     expect(result.completionBudgetReport).toContain("380")
   })
 
+  test("exposes the usage breakdown and reports it in the budget line", () => {
+    const goal = {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      tokensUsed: 1067,
+      usage: { input: 1000, output: 10, reasoning: 5, cacheRead: 50, cacheWrite: 2 },
+    }
+    const result = buildToolResult(goal)
+    expect(result.goal.usage).toEqual({ input: 1000, output: 10, reasoning: 5, cacheRead: 50, cacheWrite: 2 })
+    expect(result.completionBudgetReport).toContain("cacheRead 50")
+    expect(result.completionBudgetReport).toContain("new work 1017")
+  })
+
   test("includes the full objective and the blocker streak", () => {
     const goal = { ...createGoal({ goalId: "g1", objective: "x".repeat(5000), now: 0 }), blockerStreak: 2 }
     const result = buildToolResult(goal)

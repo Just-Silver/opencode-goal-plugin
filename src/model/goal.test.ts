@@ -12,6 +12,7 @@ describe("createGoal", () => {
       objective: "finish the thing",
       status: "active",
       tokensUsed: 0,
+      usage: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
       timeUsedSeconds: 0,
       blockerStreak: 0,
       emptyStreak: 0,

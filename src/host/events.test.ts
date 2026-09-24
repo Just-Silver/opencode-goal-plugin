@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
-import { createGoal } from "../model/goal"
+import { complete, createGoal } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
 import { createContinuation, type Continuation } from "./continuation"
 import { createEventRouter } from "./events"
@@ -47,6 +47,7 @@ function makeRouter(deps: GoalDeps, continuation: Continuation) {
   return {
     handle: (event: { type: string; data?: Record<string, unknown>; location?: { directory?: unknown } }) =>
       inner.handle({ location: { directory: deps.locationDirectory }, ...event }),
+    pendingUsage: (sessionID: string) => inner.pendingUsage(sessionID),
   }
 }
 
@@ -75,8 +76,105 @@ describe("createEventRouter", () => {
     })
     await router.handle(executionSucceeded("ses_1"))
 
-    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(17)
+    // 口径 = 真实处理量：100 + 10 + 5 + 50(cacheRead) + 2(cacheWrite) = 167
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(167)
     expect(prompts).toEqual(["build"])
+  })
+
+  test("counts the whole turn, including steps after the goal completes", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    // 第 1 步：目标还 active
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 2 } } },
+    })
+    // 模型在这一轮里 complete（工具层直接落盘，状态中途翻转）
+    await deps.repo.save("ses_1", complete((await deps.repo.load("ses_1"))!, 1000))
+    // 第 2 步：状态已是 complete —— 旧实现会漏掉这一步的 token
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 1000, output: 20, reasoning: 0, cache: { read: 500, write: 0 } } },
+    })
+    await router.handle(executionSucceeded("ses_1"))
+
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("complete")
+    expect(goal?.tokensUsed).toBe(167 + 1520)
+  })
+
+  test("exposes the in-flight usage while the turn is open, and clears it at turn end", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 2 } } },
+    })
+    expect(router.pendingUsage("ses_1")?.tokens).toEqual({
+      input: 100,
+      output: 10,
+      reasoning: 5,
+      cacheRead: 50,
+      cacheWrite: 2,
+    })
+    await router.handle(executionSucceeded("ses_1"))
+    expect(router.pendingUsage("ses_1")).toBeUndefined()
+  })
+
+  test("a turn with no active goal accrues nothing", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", complete(createGoal({ goalId: "g1", objective: "o", now: 0 }), 0))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 2 } } },
+    })
+    await router.handle(executionSucceeded("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(0)
+  })
+
+  test("an interrupted turn still accrues its finished steps", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
+    })
+    await router.handle({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("paused")
+    expect(goal?.tokensUsed).toBe(11)
+  })
+
+  test("writes the record once per turn, not once per step", async () => {
+    let writes = 0
+    const storage = memoryStorage()
+    const counting: StorageLike = {
+      ...storage,
+      set: async (key, value) => {
+        writes += 1
+        await storage.set(key, value)
+      },
+    }
+    const deps = { ...makeDeps(), repo: createRepository(counting) }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    for (let i = 0; i < 3; i++)
+      await router.handle({
+        type: "session.step.ended",
+        data: { sessionID: "ses_1", tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
+      })
+    await router.handle(executionSucceeded("ses_1"))
+    expect(writes).toBe(2) // 1 次建目标 + 1 次轮末落账（3 个 step 不写）
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(6)
   })
 
   test("three consecutive empty automatic turns block the goal", async () => {

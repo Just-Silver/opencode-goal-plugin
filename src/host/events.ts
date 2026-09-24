@@ -2,7 +2,7 @@ import { resetBlockerStreak } from "../model/blocked"
 import { applyTurn } from "../model/empty"
 import { pause } from "../model/goal"
 import { applyBudget } from "../model/limits"
-import { accrue, type TokenDelta } from "../model/usage"
+import { accrue, addDelta, emptyDelta, type TokenDelta } from "../model/usage"
 import type { Goal } from "../model/types"
 import type { Continuation } from "./continuation"
 import type { GoalDeps } from "./deps"
@@ -44,10 +44,20 @@ export interface EventRouter {
   handle(event: EventLike): Promise<void>
   /** 只读诊断视图，供调试命令/工具使用；不参与任何业务判定。 */
   diagnostics(): DebugSnapshot
+  /** 轮内尚未落账的用量（只读；工具/命令展示用，不参与业务判定）。 */
+  pendingUsage(sessionID: string): { tokens: TokenDelta; elapsedSeconds: number } | undefined
 }
 
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+/** 轮内累积的用量：`step.ended` 只累加，轮末一次性落账。 */
+interface TurnUsage {
+  tokens: TokenDelta
+  elapsedSeconds: number
+  /** 本轮出现过 active 目标 → 整轮 token 归属目标（覆盖本轮 create/resume/complete）。 */
+  touched: boolean
 }
 
 /** 事件环只记这些类型，避免被 delta 类高频事件刷屏。 */
@@ -75,6 +85,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
   const stepStartedAt = new Map<string, number>()
   const trackers = new Map<string, TurnTracker>()
   const turnOpen = new Set<string>()
+  const turnUsage = new Map<string, TurnUsage>()
   /** 事件不带 location 时的归属回落：会话所在目录缓存（每会话一次查询）。 */
   const sessionLocations = new Map<string, string | null>()
   const belongsToThisLocation = async (sessionID: string): Promise<boolean> => {
@@ -180,12 +191,22 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
             input: num(tokens.input),
             output: num(tokens.output),
             reasoning: num(tokens.reasoning),
+            cacheRead: num(cache.read),
             cacheWrite: num(cache.write),
           }
           const started = stepStartedAt.get(sessionID)
           const elapsed = started === undefined ? 0 : Math.max(0, (deps.now() - started) / 1000)
           stepStartedAt.delete(sessionID)
-          await save(sessionID, (goal, now) => accrue(goal, delta, elapsed, now))
+          // 只累积、不写库；轮末（或中断）才一次性落账 —— 否则收尾轮（状态已翻成
+          // complete/blocked/budget-limited 之后仍在进行的 step）会被漏记。
+          const usage = turnUsage.get(sessionID) ?? { tokens: emptyDelta(), elapsedSeconds: 0, touched: false }
+          usage.tokens = addDelta(usage.tokens, delta)
+          usage.elapsedSeconds += elapsed
+          if (!usage.touched) {
+            const goal = await deps.repo.load(sessionID)
+            if (goal?.status === "active") usage.touched = true
+          }
+          turnUsage.set(sessionID, usage)
           return
         }
 
@@ -211,6 +232,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           turnOpen.add(sessionID)
           tracker(sessionID).start(pendingAutomatic.delete(sessionID))
           blockedThisTurn.set(sessionID, false)
+          turnUsage.set(sessionID, { tokens: emptyDelta(), elapsedSeconds: 0, touched: false })
           return
         }
 
@@ -222,9 +244,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           const facts = tracker(sessionID).finish()
           const reportedBlocker = blockedThisTurn.get(sessionID) === true
           blockedThisTurn.set(sessionID, false)
+          const usage = turnUsage.get(sessionID)
+          turnUsage.delete(sessionID)
           let blocked = false
           await save(sessionID, (goal, now) => {
-            const result = applyTurn(goal, facts, deps.options.emptyThreshold, now)
+            // 先记账（整轮，含收尾轮），再判空转/blocker，最后 applyBudget 在 save 内统一跑。
+            const accrued = usage?.touched ? accrue(goal, usage.tokens, usage.elapsedSeconds, now) : goal
+            const result = applyTurn(accrued, facts, deps.options.emptyThreshold, now)
             blocked = result.blocked
             // spec §7：某轮未报 block → streak 归零；报了 block 则保留（由本层判定，model 只负责归零）。
             return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
@@ -249,7 +275,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           blockedThisTurn.delete(sessionID)
           stepStartedAt.delete(sessionID)
           trackers.delete(sessionID)
-          await save(sessionID, (goal, now) => (goal.status === "active" ? pause(goal, now) : goal))
+          const usage = turnUsage.get(sessionID)
+          turnUsage.delete(sessionID)
+          await save(sessionID, (goal, now) => {
+            // 中断也要把中断前已产生的部分轮落账（被中断的那一步若没 emit step.ended，则拿不到其 token）。
+            const accrued = usage?.touched ? accrue(goal, usage.tokens, usage.elapsedSeconds, now) : goal
+            return accrued.status === "active" ? pause(accrued, now) : accrued
+          })
           return
         }
 
@@ -261,10 +293,16 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           stepStartedAt.delete(sessionID)
           trackers.delete(sessionID)
           turnOpen.delete(sessionID)
+          turnUsage.delete(sessionID)
           sessionLocations.delete(sessionID)
           return
         }
       }
+    },
+
+    pendingUsage(sessionID) {
+      const usage = turnUsage.get(sessionID)
+      return usage ? { tokens: usage.tokens, elapsedSeconds: usage.elapsedSeconds } : undefined
     },
 
     diagnostics() {

@@ -4,7 +4,7 @@ import { createCommandHandler } from "./host/commands"
 import { createContinuation } from "./host/continuation"
 import { createDebug } from "./host/debug"
 import type { GoalDeps } from "./host/deps"
-import { createEventRouter, type EventLike } from "./host/events"
+import { createEventRouter, type EventLike, type EventRouter } from "./host/events"
 import { createCompactionHook, createContextHook } from "./host/hooks"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
@@ -20,6 +20,8 @@ export default {
   async setup(ctx: Plugin.Context) {
     const options = resolveOptions(ctx.options)
     const repo = createRepository(ctx.storage)
+    // 事件路由稍后才建；先留引用，让工具/命令在展示时能叠加「轮内尚未落账的用量」。
+    let routerRef: EventRouter | undefined
     const deps: GoalDeps = {
       repo,
       options,
@@ -35,6 +37,7 @@ export default {
           return undefined
         }
       },
+      pendingUsage: (sessionID) => routerRef?.pendingUsage(sessionID),
     }
 
     // 投递给模型的入口一律走 synthetic：TUI 只显示 `description` 一行（否则整段 prompt 会刷屏），
@@ -50,6 +53,7 @@ export default {
     // 事件路由先建：命令/工具/调试视图都要引用它。
     const continuation = createContinuation(deps, { deliver })
     const router = createEventRouter(deps, continuation)
+    routerRef = router
     const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
 
     // 命令：保留名服务端确定性处理；其余转发给模型。调试命令只读、零 token、不走模型。

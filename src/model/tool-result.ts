@@ -1,4 +1,5 @@
-import type { Goal, GoalStatus } from "./types"
+import type { Goal, GoalStatus, GoalUsage } from "./types"
+import { newWorkOf } from "./usage"
 
 export interface GoalView {
   readonly goalId: string
@@ -6,6 +7,8 @@ export interface GoalView {
   readonly objective: string
   readonly tokenBudget: number | null
   readonly tokensUsed: number
+  /** 分项累计；旧记录（0.1.0 及以前）为 null。 */
+  readonly usage: GoalUsage | null
   readonly timeUsedSeconds: number
   readonly blockerKey: string | null
   readonly blockerText: string | null
@@ -28,10 +31,11 @@ export interface ToolResult {
  */
 export function buildToolResult(goal: Goal): ToolResult {
   const remaining = goal.tokenBudget === undefined ? null : Math.max(0, goal.tokenBudget - goal.tokensUsed)
+  const breakdown = goal.usage ? ` (cacheRead ${goal.usage.cacheRead}, new work ${newWorkOf(goal.usage)})` : ""
   const completionBudgetReport =
     goal.tokenBudget === undefined
-      ? `no token budget; tokens used ${goal.tokensUsed}`
-      : `tokens used ${goal.tokensUsed} / budget ${goal.tokenBudget}; remaining ${remaining}`
+      ? `no token budget; tokens used ${goal.tokensUsed}${breakdown}`
+      : `tokens used ${goal.tokensUsed} / budget ${goal.tokenBudget}; remaining ${remaining}${breakdown}`
   return {
     goal: {
       goalId: goal.goalId,
@@ -39,6 +43,7 @@ export function buildToolResult(goal: Goal): ToolResult {
       objective: goal.objective,
       tokenBudget: goal.tokenBudget ?? null,
       tokensUsed: goal.tokensUsed,
+      usage: goal.usage ?? null,
       timeUsedSeconds: goal.timeUsedSeconds,
       blockerKey: goal.blockerKey ?? null,
       blockerText: goal.blockerText ?? null,

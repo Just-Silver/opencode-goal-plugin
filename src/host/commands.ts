@@ -1,5 +1,6 @@
 import { pause, resume } from "../model/goal"
 import type { Goal } from "../model/types"
+import { newWorkOf, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
@@ -56,7 +57,10 @@ export function createCommandHandler(deps: GoalDeps, port: CommandPort): (input:
         })
         return
       case "status":
-        await port.notify(sessionID, existing ? statusLine(existing) : "No goal is set for this session.")
+        await port.notify(
+          sessionID,
+          existing ? statusLine(withPending(existing, deps.pendingUsage?.(sessionID))) : "No goal is set for this session.",
+        )
         return
       case "pause": {
         if (!existing) return port.notify(sessionID, "No goal is set for this session.")
@@ -85,6 +89,7 @@ export function createCommandHandler(deps: GoalDeps, port: CommandPort): (input:
 }
 
 function statusLine(goal: Goal): string {
-  const budget = goal.tokenBudget === undefined ? "no token budget" : `${goal.tokensUsed}/${goal.tokenBudget} tokens`
-  return `Goal (${goal.status}) — ${budget}; ${goal.timeUsedSeconds}s. Objective: ${goal.objective}`
+  const budget = goal.tokenBudget === undefined ? "no budget" : `budget ${goal.tokenBudget}`
+  const detail = goal.usage ? ` (cacheRead ${goal.usage.cacheRead} · new work ${newWorkOf(goal.usage)})` : ""
+  return `Goal (${goal.status}) — tokens ${goal.tokensUsed} / ${budget}${detail}; ${goal.timeUsedSeconds}s. Objective: ${goal.objective}`
 }

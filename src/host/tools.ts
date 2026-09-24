@@ -4,7 +4,8 @@ import { applyBudget } from "../model/limits"
 import { normalizeObjective } from "../model/objective"
 import { parseToolArgs } from "../model/tool-args"
 import { buildToolResult } from "../model/tool-result"
-import { isOpenStatus } from "../model/types"
+import { isOpenStatus, type Goal } from "../model/types"
+import { withPending } from "../model/usage"
 import { blockedWrapUp, budgetLimitPrompt } from "../prompts/index"
 import type { GoalDeps } from "./deps"
 
@@ -53,6 +54,8 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
       const { sessionID } = context
       const now = deps.now()
       const existing = await deps.repo.load(sessionID)
+      // 展示用：叠加本轮尚未落账的用量（持久化只到上一轮为止；轮末才 flush）。
+      const view = (goal: Goal) => buildToolResult(withPending(goal, deps.pendingUsage?.(sessionID)))
 
       switch (args.op) {
         case "create": {
@@ -69,11 +72,11 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
             maxTokenBudget: deps.options.maxGoalTokenBudget,
           })
           await deps.repo.save(sessionID, goal)
-          return asContent(buildToolResult(goal))
+          return asContent(view(goal))
         }
 
         case "get": {
-          return asContent(existing ? buildToolResult(existing) : { goal: null })
+          return asContent(existing ? view(existing) : { goal: null })
         }
 
         case "complete": {
@@ -81,7 +84,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           if (existing.status !== "active") throw new Error(`goal: cannot complete a ${existing.status} goal`)
           const goal = complete(existing, now)
           await deps.repo.save(sessionID, goal)
-          return asContent(buildToolResult(goal))
+          return asContent(view(goal))
         }
 
         case "resume": {
@@ -90,7 +93,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           const resumed = resume(existing, now)
           const goal = applyBudget(resumed, now)
           await deps.repo.save(sessionID, goal)
-          return asContent(buildToolResult(goal))
+          return asContent(view(goal))
         }
 
         case "drop": {
@@ -109,7 +112,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           )
           const goal = applyBudget(reported, now)
           await deps.repo.save(sessionID, goal)
-          const result = buildToolResult(goal)
+          const result = view(goal)
           if (goal.status === "blocked" && blocked)
             return asContent({ ...result, instruction: blockedWrapUp(goal) })
           if (goal.status === "budget-limited")

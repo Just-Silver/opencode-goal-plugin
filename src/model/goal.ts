@@ -1,4 +1,5 @@
 import type { Goal, GoalStatus } from "./types"
+import { emptyUsage } from "./usage"
 
 export type GoalErrorCode = "budget-exceeds-max" | "not-resumable" | "not-completable"
 
@@ -29,6 +30,7 @@ export function createGoal(input: CreateInput): Goal {
     status: "active",
     ...(input.tokenBudget === undefined ? {} : { tokenBudget: input.tokenBudget }),
     tokensUsed: 0,
+    usage: emptyUsage(),
     timeUsedSeconds: 0,
     blockerStreak: 0,
     emptyStreak: 0,

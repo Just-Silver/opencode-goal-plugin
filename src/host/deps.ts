@@ -1,3 +1,4 @@
+import type { TokenDelta } from "../model/usage"
 import type { Options } from "../config"
 import type { Repository } from "../store/repository"
 
@@ -12,4 +13,9 @@ export interface GoalDeps {
   readonly locationDirectory: string
   /** 查询会话所在的 location 目录（事件不带 location 时的归属回落，见 events.ts）。 */
   readonly sessionDirectory: (sessionID: string) => Promise<string | undefined>
+  /**
+   * 轮内尚未落账的用量（只读）。记账改成「轮内累积、轮末落账」后，KV 在轮中还是旧值，
+   * 工具/命令展示时用它叠加，避免 complete 时报告全 0（见 events.ts 的累积器）。
+   */
+  readonly pendingUsage?: (sessionID: string) => { tokens: TokenDelta; elapsedSeconds: number } | undefined
 }

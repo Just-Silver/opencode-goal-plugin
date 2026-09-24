@@ -115,7 +115,8 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
 
 ## 6. 记账与持久化 **[定·倾向]**
 
-- **token delta**：含 `cacheWrite`、排除 `cacheRead`（面向 Anthropic 系）。
+- **token delta（0.1.1 起）**：计 **`input + output + reasoning + cacheRead + cacheWrite`**（真实处理量）。cacheRead 是每轮重读整个上下文的量，既是真实消耗也是 runaway 最灵敏的信号；Codex/OMP 只算「新工作」（不含 cacheRead），我们有意不同。分项一并存进记录，`status` 可展示「总量 / 重读 / 新工作」。
+- **记账时机**：`step.ended` 只累加内存，**轮末或中断时一次性落账**（收尾轮不再漏记）。
 - **墙钟**：按秒累加，差值记账。
 - **串行化**：记账用 promise 链/信号量，避免并发。
 - **落盘节流**：只在大 delta、状态翻转、会话切换前写。
