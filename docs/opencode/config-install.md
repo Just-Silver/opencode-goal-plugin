@@ -101,6 +101,7 @@ OpenCode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
 ## 5. 验证方法（避免假阴性 / 假阳性）
 
 - `opencode plugin list` / `GET /api/plugin` **不枚举「配置里的插件」** → 「没列出」是**无效信号**，不能据此判定加载失败。
+- 补充（源自 `opencode-tui-usage/AGENTS.md`，2026-09-25 复核）：`plugin list` 读的是**后台 service 的缓存** —— 改了配置/磁盘后要 `opencode service restart`（或等 `plugin update`）才会刷新；而 `api --standalone` 会起一个私有子服务，能即时看到真值。判别顺序：先 `service restart`，再 `api --standalone --print-logs` 看 `msg="loading plugin"` / `WARN failed to load plugin ... cause`。
 - 真实加载看 **stderr**：`opencode api --standalone --print-logs GET /api/plugin`，观察 `msg="loading plugin"` 与 `WARN failed to load plugin ... cause`。
 - 同名 spec（含 ref）的 git 安装会命中 `~/.cache/opencode/npm/git-*` 的**旧副本**，代码改了也不重拉 → 需清缓存或换 ref。
 - `tui.json(c)` 的 `plugin` 字段在 `2.0.15` 上**未生效**（疑似更高版本才支持）；CLI 侧插件来源实际仍以发现式为准。
@@ -123,7 +124,56 @@ OpenCode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
 ## 7. 参考文件
 
 - 原始文档：`docs/config-install.md` @ `Just-Silver/opencode-tui-usage`
+- 目录型插件布局（入口约定）出处：`AGENTS.md` @ `Just-Silver/opencode-tui-usage`（「布局硬约束」、`# opencode2 版本与插件加载`）
+- 宿主源码快照（本次复核用；取自 `Externals/opencode` 分支 `v2` @ `c1f5065`，version `2.0.16`）：
+  - `sources/packages/plugin/src/host.ts` —— `Host.resolve` / `Host.load` / `Entrypoints`（入口解析的**唯一**依据）
+  - `sources/packages/core/src/plugin/source-directory.ts` —— 发现器：只扫 `plugin`/`plugins` 的**直接子项**
+  - `sources/packages/core/src/plugin/module.ts` —— 本地 vs package 两条加载路径、`Module.default` 形状约束
+  - `sources/packages/core/src/config/plugin/source.ts` —— `plugins[]` 解析、「目标须为目录」、解析不出入口即**静默丢弃**
 - 相关设计（已废止，回退脚本安装）：`docs/superpowers/specs/2026-09-24-config-install-design.md`、`docs/superpowers/plans/2026-09-24-config-install.md`
+
+---
+
+## 9. 目录型插件布局与发现器
+
+> 出处：`Just-Silver/opencode-tui-usage` 的 `AGENTS.md`。**本章已对宿主源码逐条复核**（快照见 §7），不是照抄结论。
+
+### 9.1 发现器（`packages/core/src/plugin/source-directory.ts`）
+
+- 只扫两个目录：`<config>/plugin`、`<config>/plugins`（`names = ["plugin", "plugins"]`）。
+- 只看**直接子项**，**不递归**：
+  - 直接子**文件**且扩展名 `.ts`/`.js`（或指向文件的符号链接）→ **文件插件**；**`.tsx` 不被发现**（文件只认 `.ts`/`.js`）。
+  - 直接子**目录**（或指向目录的符号链接）→ **目录插件**。
+  - 由此：旧的嵌套形态（如 `plugins/tui/foo.tsx`）**既不被 server 也不被 TUI 加载**，**且没有任何报错**。
+
+### 9.2 目录插件的入口（`packages/plugin/src/host.ts` 的 `Host.resolve({directory})`）
+
+| 入口 | 解析顺序 | 约定文件 |
+| --- | --- | --- |
+| `server` | `path.resolve(dir, "server")`，兜底 `path.resolve(dir, "index")` | `<dir>/server.{ts,js,…}`、`<dir>/index.{ts,js,…}` |
+| `tui` | `path.resolve(dir, "tui")` | `<dir>/tui.{ts,tsx,js,…}` |
+| `rpc`（可选） | `path.resolve(dir, "rpc")` | `<dir>/rpc.{ts,js,…}` |
+
+注意这条：判断方式是「**解析不出来就算没有**」，三个入口都**没有告警**。
+
+- **只做 server 的插件**（如本 goal 插件）必须有 `<dir>/server.ts`（或 `index.ts`）。**只有 `package.json` 的 `exports` 不算** —— `exports` 只在「按包名导入」（git/npm 安装）时生效，见 §2 与 §8 第 2 条。
+- **只做 TUI 的插件**同理必须有 `<dir>/tui.tsx`；而**配置安装**还额外需要一个 no-op **server** 入口，否则整包会被 server 跳过（§2、§6）。
+- **配置安装**（`plugins[].package` 指向目录）与**发现式安装**（目录放进 `<config>/plugins/`）走的是**同一条** `Host.resolve({directory})`。两者差别只在「从哪发现」与「是否被 watch」（后者见 §8 第 3 条）。
+
+### 9.3 最小可用目录插件（server 侧，本仓库形态，实测）
+
+```text
+<dir>/
+  server.ts          # 入口（转发或直接 export default { id, setup }）
+  package.json       # type: module；exports 供 git/npm 安装走；对目录安装无影响
+  src/**             # 其余实现与测试
+```
+
+```ts
+// <dir>/server.ts
+export { default } from "./src/server"
+```
+
 
 ---
 
