@@ -8,95 +8,88 @@ export interface DebugSource {
 }
 
 export interface Debug {
-  /** 渲染一次诊断输出（纯文本/Markdown）；空 op 或未知 op 返回帮助。 */
+  /** 渲染一次诊断输出（**纯文本**）；空 op 或未知 op 返回用法。 */
   render(op: string, sessionID: string): Promise<string>
 }
 
 export const DEBUG_OPS = ["env", "events", "sessions", "state"] as const
 
+/**
+ * 注意：这些文本最终走 `session.synthetic` 的 `description`，而 TUI 的 notice 行是
+ * **纯文本渲染、不解析 Markdown**（`###`、`| 表格 |` 会原样显示，很难看）。
+ * 所以这里一律输出裸文本，不要用 Markdown 语法。
+ */
+function usage(pluginId: string): string {
+  return `${pluginId} debug — 用法: env | events | sessions | state`
+}
+
+function block(header: string, rows: readonly string[]): string {
+  return [header, ...(rows.length === 0 ? ["(none)"] : rows)].join("\n")
+}
+
 function short(id: string, length = 16): string {
   return id.length <= length ? id : `${id.slice(0, length)}…`
+}
+
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`
 }
 
 function clock(ms: number): string {
   return new Date(ms).toISOString().slice(11, 23)
 }
 
-function help(pluginId: string): string {
-  return [
-    `### ${pluginId} debug`,
-    "",
-    "- `env` — 本实例的 location、目标会话所在目录、归属判定",
-    "- `events` — 最近事件 + 归属判定结果（allow / drop-other-location / drop-unknown-session）",
-    "- `sessions` — 已存储的全部 goal 记录",
-    "- `state` — 本会话的内存轮状态",
-  ].join("\n")
-}
-
-function table(header: readonly string[], rows: readonly (readonly string[])[]): string {
-  const head = `| ${header.join(" | ")} |`
-  const sep = `| ${header.map(() => "---").join(" | ")} |`
-  if (rows.length === 0) return `${head}\n${sep}\n| ${header.map(() => "").join(" | ")} |`
-  return [head, sep, ...rows.map((row) => `| ${row.join(" | ")} |`)].join("\n")
-}
-
 async function renderEnv(deps: GoalDeps, source: DebugSource, sessionID: string): Promise<string> {
   const directory = await deps.sessionDirectory(sessionID)
   const verdict = directory === undefined ? "unknown" : directory === deps.locationDirectory ? "yes" : "no"
-  return [
-    `### ${source.pluginId} debug env`,
-    "",
-    `- instance location: \`${deps.locationDirectory}\``,
-    `- session: \`${sessionID}\``,
-    `- session directory: ${directory === undefined ? "(unknown)" : `\`${directory}\``}`,
-    `- belongs to this instance: **${verdict}**`,
-    `- options: \`${JSON.stringify(deps.options)}\``,
-  ].join("\n")
+  return block(`${source.pluginId} debug env`, [
+    `instance location: ${deps.locationDirectory}`,
+    `session: ${sessionID}`,
+    `session directory: ${directory ?? "(unknown)"}`,
+    `belongs to this instance: ${verdict}`,
+    `options: ${JSON.stringify(deps.options)}`,
+  ])
 }
 
 function renderEvents(pluginId: string, events: readonly DebugEventRecord[]): string {
-  const rows = events.map((event) => [
-    clock(event.at),
-    event.type,
-    event.sessionID === undefined ? "-" : short(event.sessionID),
-    event.hasLocation ? short(event.location ?? "", 28) : "-",
-    event.decision,
-  ])
-  return [`### ${pluginId} debug events (last ${events.length})`, "", table(["at", "type", "session", "location", "decision"], rows)].join(
-    "\n",
+  const rows = events.map((event) =>
+    [
+      clock(event.at),
+      event.type,
+      event.sessionID === undefined ? "-" : short(event.sessionID),
+      event.hasLocation ? short(event.location ?? "", 28) : "-",
+      event.decision,
+    ].join("  "),
   )
+  return block(`${pluginId} debug events (last ${events.length})`, rows)
 }
 
 async function renderSessions(deps: GoalDeps, pluginId: string): Promise<string> {
   const all = await deps.repo.listAll()
-  const rows = all.map(({ sessionID, goal }) => [
-    short(sessionID),
-    goal.status,
-    goal.objective.length > 60 ? `${goal.objective.slice(0, 60)}…` : goal.objective,
-    clock(goal.updatedAt),
-  ])
-  return [`### ${pluginId} debug sessions (${all.length})`, "", table(["session", "status", "objective", "updated"], rows)].join("\n")
+  const rows = all.map(({ sessionID, goal }) =>
+    [short(sessionID), goal.status, clip(goal.objective, 60), clock(goal.updatedAt)].join("  "),
+  )
+  return block(`${pluginId} debug sessions (${all.length})`, rows)
 }
 
 async function renderState(deps: GoalDeps, pluginId: string, sessionID: string, snapshot: DebugSnapshot): Promise<string> {
   const state = snapshot.sessions.find((item) => item.sessionID === sessionID)
   const goal = await deps.repo.load(sessionID)
-  return [
-    `### ${pluginId} debug state`,
-    "",
-    `- session: \`${sessionID}\``,
-    `- turn open: ${state === undefined ? "(no tracked state)" : state.turnOpen}`,
-    `- agent: ${state?.agent ?? "unknown"}`,
-    `- session directory cache: ${state?.sessionDirectory === undefined || state?.sessionDirectory === null ? "(none)" : `\`${state.sessionDirectory}\``}`,
-    `- pending automatic: ${state === undefined ? "-" : state.pendingAutomatic}`,
-    `- blocked this turn: ${state === undefined ? "-" : state.blockedThisTurn}`,
-    `- goal: ${goal === undefined ? "(none)" : `${goal.status}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`}`,
-  ].join("\n")
+  const cache = state?.sessionDirectory
+  return block(`${pluginId} debug state`, [
+    `session: ${sessionID}`,
+    `turn open: ${state === undefined ? "(no tracked state)" : state.turnOpen}`,
+    `agent: ${state?.agent ?? "unknown"}`,
+    `session directory cache: ${cache === undefined || cache === null ? "(none)" : cache}`,
+    `pending automatic: ${state === undefined ? "-" : state.pendingAutomatic}`,
+    `blocked this turn: ${state === undefined ? "-" : state.blockedThisTurn}`,
+    `goal: ${goal === undefined ? "(none)" : `${goal.status}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`}`,
+  ])
 }
 
 /**
  * `/goal-debug` 的确定性入口：零 token、只读、不产生任何副作用。
- * 故意与业务工具分开，避免调试标记污染 `goal` 的正常输出。
+ * 输出保持**短**且为纯文本：命令的唯一出口是往会话插一条消息，会留在历史里。
  */
 export function createDebug(deps: GoalDeps, source: DebugSource): Debug {
   return {
@@ -105,7 +98,7 @@ export function createDebug(deps: GoalDeps, source: DebugSource): Debug {
       switch (op) {
         case "":
         case "help":
-          return help(source.pluginId)
+          return usage(source.pluginId)
         case "env":
           return renderEnv(deps, source, sessionID)
         case "events":
@@ -115,7 +108,7 @@ export function createDebug(deps: GoalDeps, source: DebugSource): Debug {
         case "state":
           return renderState(deps, source.pluginId, sessionID, source.snapshot())
         default:
-          return `Unknown debug subcommand: \`${op}\`\n\n${help(source.pluginId)}`
+          return `Unknown debug subcommand: ${op}\n${usage(source.pluginId)}`
       }
     },
   }

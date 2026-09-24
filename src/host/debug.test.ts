@@ -47,16 +47,19 @@ describe("createDebug", () => {
   test("env reports the instance location, the session directory and the verdict", async () => {
     const { debug } = makeDebug(makeDeps())
     const text = await debug.render("env", "ses_1")
-    expect(text).toContain('instance location: `own`')
-    expect(text).toContain("session directory: `own`")
-    expect(text).toContain("belongs to this instance: **yes**")
+    expect(text).toContain("instance location: own")
+    expect(text).toContain("session directory: own")
+    expect(text).toContain("belongs to this instance: yes")
+    // notice 行是纯文本渲染：输出里不能有 Markdown 语法（### / 反引号）。
+    expect(text).not.toContain("###")
+    expect(text).not.toContain("`")
   })
 
   test("env flags a session that belongs to another location", async () => {
     const deps = { ...makeDeps(), sessionDirectory: async () => "elsewhere" }
     const { debug } = makeDebug(deps)
     const text = await debug.render("env", "ses_1")
-    expect(text).toContain("belongs to this instance: **no**")
+    expect(text).toContain("belongs to this instance: no")
   })
 
   test("events lists tracked events with the ownership decision", async () => {
@@ -71,6 +74,9 @@ describe("createDebug", () => {
     expect(text).toContain("session.execution.started")
     expect(text).toContain("allow")
     expect(text).toContain("drop-other-location")
+    // 不再用 Markdown 表格（notice 行不渲染 Markdown，竖线会原样显示）。
+    expect(text).not.toContain("|")
+    expect(text).not.toContain("###")
   })
 
   test("sessions lists stored goal records", async () => {
@@ -90,9 +96,12 @@ describe("createDebug", () => {
     expect(text).toContain("goal: (none)")
   })
 
-  test("empty or unknown subcommands fall back to help", async () => {
+  test("empty or unknown subcommands fall back to usage (one short line)", async () => {
     const { debug } = makeDebug(makeDeps())
-    expect(await debug.render("", "ses_1")).toContain("opencode-goal debug")
+    const empty = await debug.render("", "ses_1")
+    expect(empty).toContain("opencode-goal debug")
+    // 用法必须是一行：它会留在会话历史里。
+    expect(empty.split("\n")).toHaveLength(1)
     const text = await debug.render("nope", "ses_1")
     expect(text).toContain("Unknown debug subcommand")
     expect(text).toContain("events")
