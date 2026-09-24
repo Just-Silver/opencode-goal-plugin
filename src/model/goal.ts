@@ -59,8 +59,3 @@ export function complete(goal: Goal, now: number): Goal {
   if (goal.status !== "active") throw new GoalError("not-completable", `not-completable: cannot complete a ${goal.status} goal`)
   return next(goal, "complete", now)
 }
-
-/** 用户放弃（/goal clear 或模型 drop）：结束目标并清空审计。 */
-export function drop(goal: Goal, now: number): Goal {
-  return next(goal, "complete", now, { blockerKey: undefined, blockerStreak: 0 })
-}

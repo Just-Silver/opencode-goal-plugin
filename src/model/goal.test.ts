@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { GoalError, complete, createGoal, drop, pause, resume } from "./goal"
+import { GoalError, complete, createGoal, pause, resume } from "./goal"
 
 const base = { goalId: "g1", objective: "finish the thing", now: 1000 }
 
@@ -79,12 +79,5 @@ describe("transitions", () => {
     const paused = pause(done, 3000)
     expect(paused.status).toBe("complete")
     expect(paused.updatedAt).toBe(2000)
-  })
-
-  test("drop clears the blocker audit and stops the goal", () => {
-    const blocked = { ...goal, status: "blocked" as const, blockerStreak: 2 }
-    const dropped = drop(blocked, 4000)
-    expect(dropped.status).toBe("complete")
-    expect(dropped.blockerStreak).toBe(0)
   })
 })

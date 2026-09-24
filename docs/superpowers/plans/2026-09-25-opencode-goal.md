@@ -1,5 +1,7 @@
 # opencode-goal 实现计划（v1）
 
+> ⚠️ **历史快照**：本文件记录当时的实现步骤，其中 token 记账口径（§Global Constraints 与 Task 5 的 `cost = output + reasoning + cacheWrite`）**已被 0.1.1 取代** —— 现行口径见 `docs/superpowers/specs/2026-09-24-opencode-goal-design.md` §3/§10（真实处理量，含 `cacheRead`）。以 `src/` 与 spec 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为 OpenCode V2 实现 `opencode-goal` 插件——`/goal` 命令 + 单一 `goal` 工具 + per-session 持久化 + 空闲续跑 + 证据式完成 + blocked/预算护栏，配置安装一行生效。

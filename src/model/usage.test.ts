@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { accrue, addUsage, newWorkOf, tokenCost, withPending } from "./usage"
+import { accrue, addUsage, newWorkOf, tokenCost, usageIsComplete, withPending } from "./usage"
 import { createGoal } from "./goal"
 
 describe("tokenCost", () => {
@@ -62,6 +62,20 @@ describe("withPending", () => {
 
   test("returns the goal untouched when there is nothing pending", () => {
     expect(withPending(goal, undefined)).toEqual(goal)
+  })
+})
+
+describe("usageIsComplete", () => {
+  const goal = {
+    ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+    tokensUsed: 15,
+    usage: { input: 1, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 },
+  }
+
+  test("true only when the breakdown sums to tokensUsed", () => {
+    expect(usageIsComplete(goal)).toBe(true)
+    expect(usageIsComplete({ ...goal, tokensUsed: 16 })).toBe(false)
+    expect(usageIsComplete({ ...goal, usage: undefined })).toBe(false)
   })
 })
 

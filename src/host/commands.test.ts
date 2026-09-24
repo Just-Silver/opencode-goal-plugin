@@ -138,6 +138,27 @@ describe("createCommandHandler", () => {
     expect(notices.every((line) => line.includes("No goal"))).toBe(true)
   })
 
+  test("status overlays the in-flight turn usage", async () => {
+    const repo = createRepository(memoryStorage())
+    await repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const { handler, notices } = runner({
+      repo,
+      options: { ...DEFAULT_OPTIONS },
+      now: () => 1000,
+      newGoalId: () => "g1",
+      isRestricted: () => false,
+      locationDirectory: "test-location",
+      sessionDirectory: async () => "test-location",
+      pendingUsage: () => ({
+        tokens: { input: 100, output: 10, reasoning: 0, cacheRead: 50, cacheWrite: 0 },
+        elapsedSeconds: 2,
+      }),
+    })
+    await handler({ sessionID: "ses_1", prompt: { text: "status" } })
+    expect(notices[0]).toContain("tokens 160")
+    expect(notices[0]).toContain("cacheRead 50")
+  })
+
   test("a storage error while resuming propagates instead of being reported as not-resumable", async () => {
     const stored = pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1)
     const repo: Repository = {

@@ -1,5 +1,5 @@
 import type { Goal, GoalStatus, GoalUsage } from "./types"
-import { newWorkOf } from "./usage"
+import { newWorkOf, usageIsComplete } from "./usage"
 
 export interface GoalView {
   readonly goalId: string
@@ -31,7 +31,9 @@ export interface ToolResult {
  */
 export function buildToolResult(goal: Goal): ToolResult {
   const remaining = goal.tokenBudget === undefined ? null : Math.max(0, goal.tokenBudget - goal.tokensUsed)
-  const breakdown = goal.usage ? ` (cacheRead ${goal.usage.cacheRead}, new work ${newWorkOf(goal.usage)})` : ""
+  // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）。
+  const usage = goal.usage && usageIsComplete(goal) ? goal.usage : null
+  const breakdown = usage ? ` (cacheRead ${usage.cacheRead}, new work ${newWorkOf(usage)})` : ""
   const completionBudgetReport =
     goal.tokenBudget === undefined
       ? `no token budget; tokens used ${goal.tokensUsed}${breakdown}`
@@ -43,7 +45,7 @@ export function buildToolResult(goal: Goal): ToolResult {
       objective: goal.objective,
       tokenBudget: goal.tokenBudget ?? null,
       tokensUsed: goal.tokensUsed,
-      usage: goal.usage ?? null,
+      usage,
       timeUsedSeconds: goal.timeUsedSeconds,
       blockerKey: goal.blockerKey ?? null,
       blockerText: goal.blockerText ?? null,

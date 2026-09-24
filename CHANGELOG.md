@@ -10,7 +10,7 @@
 
 - **token 记账口径改为「真实处理量」**：`tokensUsed` 现计 `input + output + reasoning + cacheRead + cacheWrite`（原先只计 `output + reasoning + cacheWrite`）。原先漏掉 cacheRead —— 在有 prompt cache 的长会话里它约占 98%，导致 `token_budget` 严重低估、形同虚设。与 Codex / OMP 不同（它们排除 cacheRead），这是有意的「消耗量」口径（详见 spec §3/§10）。
 - **修掉收尾轮漏记**：`step.ended` 只累加进内存，**轮末（或中断）一次性落账**；原先状态一旦翻成 `complete` / `blocked` / `budget-limited`，同一轮后续 step 的 token 全部丢失。副作用：不再每个 step 写一次 KV，改为每轮一次。
-- `/goal status` 与 `goal` 工具返回附上分项（`cacheRead` / 「新工作」量），并**叠加本轮尚未落账的用量**（轮内实时；否则改成轮末落账后，`complete` 那一刻会报 0）。
+- `/goal status` 与 `goal` 工具返回附上分项（`cacheRead` / 「新工作」量），并**叠加本轮尚未落账的用量**（轮内实时；否则改成轮末落账后，`complete` 那一刻会报 0）。叠加只在「本轮 token 会归属该目标」时生效，且**分项仅在五项之和等于 `tokensUsed` 时展示**（旧记录升级后只给总量，避免展示对不上的数字）。
 
 ### Added
 
@@ -18,7 +18,7 @@
 
 ### 注意
 
-- 旧目标的 `tokensUsed` 与新口径不可比（**不重算**）；`usage` 分项从本版本起才开始累计。
+- 旧目标的 `tokensUsed` 与新口径不可比（**不重算**）；`usage` 分项从本版本起才开始累计 —— 因此旧记录**只显示总量**，分项要到「五项之和 == `tokensUsed`」（即从 0 开始累计的新目标）才展示。
 
 ## [0.1.0] - 2026-09-25
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
-import { complete, createGoal } from "../model/goal"
+import { complete, createGoal, pause } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
 import { createContinuation, type Continuation } from "./continuation"
 import { createEventRouter } from "./events"
@@ -123,6 +123,55 @@ describe("createEventRouter", () => {
     })
     await router.handle(executionSucceeded("ses_1"))
     expect(router.pendingUsage("ses_1")).toBeUndefined()
+  })
+
+  test("seeds touched at turn start, so a mid-turn external pause still counts", async () => {
+    // 轮首 active → 立刻播种 touched；否则若状态在首个 step.ended 之前被外部改出 active
+    // （例如用户中途 /goal pause），整轮 token 会被漏记。
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    await deps.repo.save("ses_1", pause((await deps.repo.load("ses_1"))!, 1000))
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
+    })
+    await router.handle(executionSucceeded("ses_1"))
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("paused")
+    expect(goal?.tokensUsed).toBe(11)
+  })
+
+  test("pendingUsage stays undefined for a turn that does not touch a goal", async () => {
+    // complete 目标的普通轮：展示层不得叠加本轮 pending（否则会与轮末落盘值不一致）。
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", complete(createGoal({ goalId: "g1", objective: "o", now: 0 }), 0))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 50, write: 0 } } },
+    })
+    expect(router.pendingUsage("ses_1")).toBeUndefined()
+    await router.handle(executionSucceeded("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(0)
+  })
+
+  test("a duplicate execution.started does not reset the accumulator", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    const step = {
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
+    }
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(step)
+    await router.handle(executionStarted("ses_1")) // 重复 started：不得重启轮、不得清空已累积
+    await router.handle(step)
+    await router.handle(executionSucceeded("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(22)
   })
 
   test("a turn with no active goal accrues nothing", async () => {

@@ -55,6 +55,16 @@ export function newWorkOf(usage: GoalUsage): number {
 }
 
 /**
+ * 分项是否可信：`usage` 存在且其和恰等于 `tokensUsed`。
+ * 旧记录（0.1.0，无 `usage`）在 0.1.1 里被 accrue 后，`usage` 只含升级后的增量，
+ * 与 `tokensUsed` 不等 —— 此时**只展示总量，不展示分项**，避免给出对不上的数字。
+ */
+export function usageIsComplete(goal: Goal): boolean {
+  if (!goal.usage) return false
+  return tokenCost(goal.usage) === goal.tokensUsed
+}
+
+/**
  * 累加一轮的用量与墙钟。**不看状态**：归属判定由调用方在轮末完成
  * （见 `host/events.ts` 的轮内累积器）——否则收尾轮（complete/blocked/budget-limited
  * 之后仍在进行的 step）会被漏记。

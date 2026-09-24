@@ -1,6 +1,6 @@
 import { pause, resume } from "../model/goal"
 import type { Goal } from "../model/types"
-import { newWorkOf, withPending } from "../model/usage"
+import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
@@ -90,6 +90,8 @@ export function createCommandHandler(deps: GoalDeps, port: CommandPort): (input:
 
 function statusLine(goal: Goal): string {
   const budget = goal.tokenBudget === undefined ? "no budget" : `budget ${goal.tokenBudget}`
-  const detail = goal.usage ? ` (cacheRead ${goal.usage.cacheRead} · new work ${newWorkOf(goal.usage)})` : ""
+  // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）。
+  const usage = goal.usage && usageIsComplete(goal) ? goal.usage : undefined
+  const detail = usage ? ` (cacheRead ${usage.cacheRead} · new work ${newWorkOf(usage)})` : ""
   return `Goal (${goal.status}) — tokens ${goal.tokensUsed} / ${budget}${detail}; ${goal.timeUsedSeconds}s. Objective: ${goal.objective}`
 }

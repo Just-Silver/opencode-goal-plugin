@@ -30,6 +30,22 @@ describe("buildToolResult", () => {
     expect(result.completionBudgetReport).toContain("new work 1017")
   })
 
+  test("hides an incomplete breakdown instead of showing mismatched numbers", () => {
+    // 旧记录（无 usage）升级后被 accrue：usage 只有增量，与 tokensUsed 不等 → 只给总量。
+    const legacy = { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), tokensUsed: 100 }
+    const result = buildToolResult(legacy)
+    expect(result.goal.usage).toBeNull()
+    expect(result.completionBudgetReport).not.toContain("cacheRead")
+
+    const partial = {
+      ...legacy,
+      usage: { input: 1, output: 1, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, // 和 2 ≠ 100
+    }
+    const result2 = buildToolResult(partial)
+    expect(result2.goal.usage).toBeNull()
+    expect(result2.completionBudgetReport).not.toContain("cacheRead")
+  })
+
   test("includes the full objective and the blocker streak", () => {
     const goal = { ...createGoal({ goalId: "g1", objective: "x".repeat(5000), now: 0 }), blockerStreak: 2 }
     const result = buildToolResult(goal)

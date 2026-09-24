@@ -232,7 +232,14 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           turnOpen.add(sessionID)
           tracker(sessionID).start(pendingAutomatic.delete(sessionID))
           blockedThisTurn.set(sessionID, false)
-          turnUsage.set(sessionID, { tokens: emptyDelta(), elapsedSeconds: 0, touched: false })
+          // 轮首就把「当时是否 active」定下来：若状态在本轮首个 step.ended 之前被外部改出 active
+          // （例如用户中途 /goal pause），惰性判定会漏掉整轮 token。
+          const atStart = await deps.repo.load(sessionID)
+          turnUsage.set(sessionID, {
+            tokens: emptyDelta(),
+            elapsedSeconds: 0,
+            touched: atStart?.status === "active",
+          })
           return
         }
 
@@ -302,7 +309,10 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
 
     pendingUsage(sessionID) {
       const usage = turnUsage.get(sessionID)
-      return usage ? { tokens: usage.tokens, elapsedSeconds: usage.elapsedSeconds } : undefined
+      // 只在本轮 token 会归属目标（touched）时叠加：否则展示值会与轮末落盘值不一致
+      // （paused/complete 目标的普通轮不该把本轮用量算到它头上）。
+      if (!usage || !usage.touched) return undefined
+      return { tokens: usage.tokens, elapsedSeconds: usage.elapsedSeconds }
     },
 
     diagnostics() {
