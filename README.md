@@ -64,16 +64,22 @@
 | `debug_command_name` | `goal-debug` | 调试命令名（只读、零 token） |
 | `debug` | `true` | 注册只读调试工具 `goal_debug`（设 `false` 可让模型工具表保持干净） |
 
-## 其它安装方式
+## 安装方式怎么选
 
-- **git 仓库**（想钉某个未发布的提交时用）：
-  `{ "package": "github:Just-Silver/opencode-goal-plugin#<40 位 commit SHA>" }`
-  —— 钉满 commit SHA 可复现；未钉版本的 git 源在 Windows 上冷启动可能弹一下控制台窗口（上游问题，见 `docs/opencode/known-issues.md`），**npm 方式没有这个问题**。
-- **本地目录**（改代码即热重载，开发用）：
-  `{ "package": "<本仓库路径>" }`
+**默认推荐 npm 包、不钉版本** —— 也就是上面「快速开始」那一行。其余写法只在特定场景才值得用：
 
-不写版本时**安装时**取 `latest`；**不会自动更新** —— 升级用 `opencode plugin update @justsilver/opencode-goal-plugin`，先看有没有新版用 `opencode plugin check`。要完全可复现就钉版本（`@justsilver/opencode-goal-plugin@0.1.0`，代价：不再提示新版）。
-安装与入口解析的内部细节（缓存路径、`files` 过滤、两种入口的差别）见 `docs/opencode/plugin-dev-gotchas.md` §3。
+| 方式 | 写法 | 适合谁 | 能检测到新版吗 | Windows 弹窗 |
+| --- | --- | --- | --- | --- |
+| **npm 包（推荐）** | `@justsilver/opencode-goal-plugin` | 绝大多数人 | ✅ | 无 |
+| npm 包 + 钉版本 | `@justsilver/opencode-goal-plugin@0.1.0` | 要完全可复现（锁死到某版） | ❌ 钉住即不检测 | 无 |
+| git + 钉 commit | `github:Just-Silver/opencode-goal-plugin#<40 位 SHA>` | 要用某个未发布的提交 | ❌ | 无 |
+| git 不钉版本 | `github:Just-Silver/opencode-goal-plugin` | 想跟 `main` 最新（不推荐） | ✅ | ⚠️ 可能弹一下（上游问题，见 `docs/opencode/known-issues.md`） |
+| 本地目录 | `{ "package": "<本仓库路径>" }` | 改代码即热重载（开发用） | — | 无 |
+
+- **不会自动更新**：不写版本时只是**安装时**取 `latest`。升级用 `opencode plugin update @justsilver/opencode-goal-plugin`；先看有没有新版用 `opencode plugin check`，或打开 TUI 的 `/plugins` 面板看 `update available`。
+- 为什么「钉版本」会关掉新版提示：钉精确版本 / 40 位 commit 会被宿主判为不可变（`mutable = false`），更新检查直接跳过 —— 换来可复现，代价是没提示。
+- 也可以把插件**直接放进 `<配置目录>/plugins/`**（发现式加载，免配置）；布局约束见 `docs/opencode/plugin-dev-gotchas.md` §3.3。
+- 安装与入口解析的内部细节（缓存路径、`files` 过滤、两种入口的差别）见 `docs/opencode/plugin-dev-gotchas.md` §3。
 
 ## 调试
 
