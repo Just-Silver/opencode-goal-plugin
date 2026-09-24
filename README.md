@@ -28,23 +28,8 @@
 }
 ```
 
-其它写法：
-
-```jsonc
-{ "plugins": ["@justsilver/opencode-goal-plugin@0.1.0"] }
-```
-
-```jsonc
-{ "plugins": ["github:Just-Silver/opencode-goal-plugin#<40 位 commit SHA>"] }
-```
-
-```jsonc
-{ "plugins": ["../opencode-goal-plugin"] }
-```
-
-- 三条依次是：钉版本（可复现，代价是不再显示有新版）、用某个未发布的提交、本地目录（开发用，改代码即热重载）。
-- 本地目录的相对路径相对**配置文件所在目录**（`./` 或 `../` 开头），也支持绝对路径与 `file://`。
-- 也可以把插件目录放进 `<配置目录>/plugins/`（免配置）。
+- 要钉住版本（可复现，代价是不再显示有新版）：`"plugins": ["@justsilver/opencode-goal-plugin@0.1.0"]`
+- 本地目录 / git 安装（改代码即热重载、用未发布的提交）见 [`docs/opencode/development.md`](docs/opencode/development.md)。
 
 ## 配置项
 
@@ -63,4 +48,4 @@
 
 ---
 
-源码与文档：<https://github.com/Just-Silver/opencode-goal-plugin>
+源码与反馈：<https://github.com/Just-Silver/opencode-goal-plugin>
