@@ -40,6 +40,7 @@ function mockCtx(get: () => Promise<unknown>) {
   }
   const ctx = {
     options: {},
+    location: { directory: "test-location" },
     storage,
     command: {
       transform: async (

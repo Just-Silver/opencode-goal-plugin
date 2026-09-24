@@ -11,6 +11,8 @@ import { createTurnTracker, type TurnTracker } from "./turn"
 export interface EventLike {
   readonly type: string
   readonly data?: Record<string, unknown>
+  /** 事件顶层 location。promise 插件订阅的是跨 location 的全局流，用它判归属。 */
+  readonly location?: { readonly directory?: unknown }
 }
 
 export interface EventRouter {
@@ -28,6 +30,8 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
   const stepStartedAt = new Map<string, number>()
   const trackers = new Map<string, TurnTracker>()
   const turnOpen = new Set<string>()
+  /** 已确认属于本 location 的会话（见 handle 的归属判定）。 */
+  const ownSessions = new Set<string>()
 
   // 轮状态按会话分键：避免 A 的 automatic 事实被 B 的 idle 结算。
   const tracker = (sessionID: string): TurnTracker => {
@@ -51,6 +55,21 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
       const data = event.data ?? {}
       const sessionID = typeof data.sessionID === "string" ? data.sessionID : undefined
       if (!sessionID) return
+
+      // 归属判定：promise 版插件的 ctx.event.subscribe() 订阅的是**跨所有 location** 的全局事件流
+      // （/api/event），而宿主为**每个 location 各加载一份**本插件。若不按 location 过滤，同一会话会被
+      // 多个实例重复处理（续跑被注入 N 次）。带 location 的事件据此判定；不带 location 的事件
+      // （如 session.execution.*）只认已登记的会话——同轮 session.step.started 总在轮末之前到达并登记。
+      const directory = event.location?.directory
+      if (typeof directory === "string") {
+        if (directory !== deps.locationDirectory) {
+          ownSessions.delete(sessionID)
+          return
+        }
+        ownSessions.add(sessionID)
+      } else if (!ownSessions.has(sessionID)) {
+        return
+      }
 
       switch (event.type) {
         case "session.agent.selected": {

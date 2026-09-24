@@ -30,6 +30,7 @@ function makeDeps(): GoalDeps {
     now: () => 1000,
     newGoalId: () => "g1",
     isRestricted: () => false,
+    locationDirectory: "test-location",
   }
 }
 

@@ -30,6 +30,7 @@ function makeDeps(overrides: Partial<GoalDeps> = {}): GoalDeps {
     now: () => 5000,
     newGoalId: () => "g1",
     isRestricted: () => false,
+    locationDirectory: "test-location",
     ...overrides,
   }
 }

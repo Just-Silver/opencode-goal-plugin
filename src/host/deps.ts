@@ -8,4 +8,6 @@ export interface GoalDeps {
   readonly now: () => number
   readonly newGoalId: () => string
   readonly isRestricted: (agentId: string) => boolean
+  /** 本插件实例所属 location 的绝对目录（供事件归属过滤，见 events.ts）。 */
+  readonly locationDirectory: string
 }

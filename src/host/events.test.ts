@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
 import { createGoal } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
-import { createContinuation } from "./continuation"
+import { createContinuation, type Continuation } from "./continuation"
 import { createEventRouter } from "./events"
 import type { GoalDeps } from "./deps"
 
@@ -24,6 +24,8 @@ function memoryStorage(): StorageLike {
   }
 }
 
+const OWN = "own"
+
 function makeDeps(): GoalDeps {
   return {
     repo: createRepository(memoryStorage()),
@@ -31,6 +33,19 @@ function makeDeps(): GoalDeps {
     now: () => 1000,
     newGoalId: () => "g1",
     isRestricted: () => false,
+    locationDirectory: OWN,
+  }
+}
+
+/**
+ * 模拟真实事件流：带 location 的事件标上本 location。事件自带 location 时以它为准
+ * （`...event` 在 `location` 之后，所以显式传入的 location 会覆盖），便于测试跨 location 忽略。
+ */
+function makeRouter(deps: GoalDeps, continuation: Continuation) {
+  const inner = createEventRouter(deps, continuation)
+  return {
+    handle: (event: { type: string; data?: Record<string, unknown>; location?: { directory?: unknown } }) =>
+      inner.handle({ location: { directory: deps.locationDirectory }, ...event }),
   }
 }
 
@@ -43,7 +58,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const prompts: string[] = []
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async (_sessionID, agentId) => {
         prompts.push(agentId)
         return true
@@ -67,7 +82,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -92,7 +107,7 @@ describe("createEventRouter", () => {
   test("session.deleted removes the record", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const router = createEventRouter(deps, { onIdle: async () => false })
+    const router = makeRouter(deps, { onIdle: async () => false })
     await router.handle({ type: "session.deleted", data: { sessionID: "ses_1" } })
     expect(await deps.repo.load("ses_1")).toBeUndefined()
   })
@@ -100,7 +115,7 @@ describe("createEventRouter", () => {
   test("an interruption pauses an active goal", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const router = createEventRouter(deps, { onIdle: async () => false })
+    const router = makeRouter(deps, { onIdle: async () => false })
     await router.handle({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
     expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
   })
@@ -112,7 +127,7 @@ describe("createEventRouter", () => {
       blockerKey: "k",
       blockerStreak: 2,
     })
-    const router = createEventRouter(deps, { onIdle: async () => false })
+    const router = makeRouter(deps, { onIdle: async () => false })
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle(executionStarted("ses_1"))
     await router.handle({ type: "session.text.ended", data: { sessionID: "ses_1", text: "moving on" } })
@@ -129,7 +144,7 @@ describe("createEventRouter", () => {
       blockerKey: "k",
       blockerStreak: 1,
     })
-    const router = createEventRouter(deps, { onIdle: async () => false })
+    const router = makeRouter(deps, { onIdle: async () => false })
     await router.handle(executionStarted("ses_1"))
     await router.handle({ type: "session.tool.called", data: { sessionID: "ses_1", input: { op: "block" } } })
     await router.handle(executionSucceeded("ses_1"))
@@ -141,7 +156,7 @@ describe("createEventRouter", () => {
     await deps.repo.save("ses_a", createGoal({ goalId: "ga", objective: "o", now: 0 }))
     await deps.repo.save("ses_b", createGoal({ goalId: "gb", objective: "o", now: 0 }))
     const prompts: string[] = []
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async (sessionID) => {
         prompts.push(sessionID)
         return true
@@ -169,7 +184,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -190,7 +205,7 @@ describe("createEventRouter", () => {
   test("user-triggered turns never grow the empty streak", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const router = createEventRouter(deps, { onIdle: async () => false })
+    const router = makeRouter(deps, { onIdle: async () => false })
     for (let turn = 0; turn < 3; turn++) {
       await router.handle(executionStarted("ses_1"))
       await router.handle(executionSucceeded("ses_1"))
@@ -204,7 +219,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -218,7 +233,7 @@ describe("createEventRouter", () => {
   test("an interruption discards the pending continuation", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
-    const router = createEventRouter(deps, { onIdle: async () => true })
+    const router = makeRouter(deps, { onIdle: async () => true })
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle(executionStarted("ses_1"))
     await router.handle(executionSucceeded("ses_1")) // 注入续跑 → pending 置位
@@ -235,7 +250,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -258,7 +273,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const prompts: string[] = []
-    const router = createEventRouter(
+    const router = makeRouter(
       deps,
       createContinuation(deps, {
         prompt: async (sessionID) => {
@@ -275,7 +290,7 @@ describe("createEventRouter", () => {
     const deps = { ...makeDeps(), isRestricted: (agentId: string) => agentId === "plan" }
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const prompts: string[] = []
-    const router = createEventRouter(
+    const router = makeRouter(
       deps,
       createContinuation(deps, {
         prompt: async (sessionID) => {
@@ -293,7 +308,7 @@ describe("createEventRouter", () => {
     const deps = { ...makeDeps(), isRestricted: (agentId: string) => agentId === "plan" }
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const prompts: string[] = []
-    const router = createEventRouter(
+    const router = makeRouter(
       deps,
       createContinuation(deps, {
         prompt: async (sessionID) => {
@@ -311,7 +326,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -328,7 +343,7 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
+    const router = makeRouter(deps, {
       onIdle: async () => {
         injected += 1
         return true
@@ -339,5 +354,45 @@ describe("createEventRouter", () => {
     await router.handle({ type: "session.status", data: { sessionID: "ses_1", status: { type: "idle" } } })
     expect(injected).toBe(0)
     expect((await deps.repo.load("ses_1"))?.emptyStreak).toBe(0)
+  })
+
+  test("events from another location are ignored", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    let injected = 0
+    const router = makeRouter(deps, {
+      onIdle: async () => {
+        injected += 1
+        return true
+      },
+    })
+    const other = { directory: "other" }
+    await router.handle({ type: "session.agent.selected", location: other, data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle({ type: "session.step.started", location: other, data: { sessionID: "ses_1", agent: "build", started: 0 } })
+    await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+    await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
+    expect(injected).toBe(0)
+  })
+
+  test("a session admitted by a located event settles from an unlocated execution end", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    let injected = 0
+    const router = makeRouter(deps, {
+      onIdle: async () => {
+        injected += 1
+        return true
+      },
+    })
+    // 未登记前，不带 location 的 execution 事件无法确认归属 → 忽略
+    await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+    await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
+    expect(injected).toBe(0)
+    // 本 location 的 step.started 到达后完成登记，之后轮次正常结算并续跑
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle({ type: "session.step.started", data: { sessionID: "ses_1", agent: "build", started: 0 } })
+    await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+    await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
+    expect(injected).toBe(1)
   })
 })

@@ -23,6 +23,7 @@ export default {
       now: () => Date.now(),
       newGoalId: () => crypto.randomUUID(),
       isRestricted: (agentId) => isRestrictedAgent(agentId, options.restrictedAgents),
+      locationDirectory: ctx.location.directory,
     }
 
     // 命令：保留名服务端确定性处理；其余转发给模型。

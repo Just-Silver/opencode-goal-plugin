@@ -73,6 +73,7 @@ function makeHandler() {
     now: () => 1000,
     newGoalId: () => "g1",
     isRestricted: () => false,
+    locationDirectory: "test-location",
   }
   return { deps, ...runner(deps) }
 }
@@ -148,6 +149,7 @@ describe("createCommandHandler", () => {
       now: () => 1000,
       newGoalId: () => "g1",
       isRestricted: () => false,
+      locationDirectory: "test-location",
     })
     await expect(handler({ sessionID: "ses_1", prompt: { text: "resume" } })).rejects.toThrow("storage down")
     expect(notices).toHaveLength(0)
