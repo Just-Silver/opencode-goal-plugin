@@ -17,7 +17,7 @@
 | 3 | `session.execution.*` **不带 `location`** | 归属回落到 `ctx.session.get({sessionID})` 查会话目录并缓存（**别**靠「等 step.started 登记」，有顺序 bug） |
 | 4 | 目录插件入口 | `<dir>/server.ts` 或 `<dir>/index.ts`；`main`/`exports` 都不参与 |
 | 5 | 插件目标必须是**目录** | 指向文件会被 `configured plugin path must be a directory` 丢弃 |
-| 6 | `opencode plugin list` 不可作加载判据 | 它读后台 service 缓存，也不枚举配置插件 |
+| 6 | `opencode plugin list` 不能作「加载成功」判据 | 它读后台 service 缓存（2026-09-25 实测：**会**列出配置的包插件与版本），但「没列出 / 列了」都不代表本次热重载成功——看日志 entrypoint |
 | 7 | `Bun.resolveSync` 缓存负面结果 | 同进程内「先探测失败 → 再建文件」仍失败 |
 | 8 | `ctx.session.synthetic` 必须 `resume: false` | 否则确定性子命令会白唤醒一轮模型 |
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
@@ -185,13 +185,32 @@ async function belongsToThisLocation(sessionID: string) {
 - 直接子 `.ts` / `.js` 文件（或指向文件的符号链接）= 文件插件；**`.tsx` 文件不被发现**。
 - 直接子**目录** = 目录插件（可含任意内部结构）。
 
+### 3.4 安装、缓存与更新语义（源码 + 实测）
+
+缓存布局：`<global cache>/npm/<key>/<generation>/node_modules/<包名>/`；每次安装落一个**新 generation**，取最后一个为「当前」。
+
+| 项 | 规则（出处） |
+| --- | --- |
+| registry 包的 key | `<name>@<spec>`；**没写版本时 spec 归一成 `latest`**（如 `@justsilver/opencode-goal-plugin@latest`）—— `util/npm.ts` `key()` / `parse()` |
+| git 源的 key | `git-<slug>-<sha256(完整 spec) 前 12 位>` |
+| **启动会联网更新吗** | **不会**。加载走 `Npm.add` → `install(update = false)`：当前 generation 里**已存在**该包就直接复用返回（`util/npm.ts:258`） |
+| 显式更新 | `opencode plugin update <spec 原样>` → `server.plugin.update` → `Npm.update` → arborist `preferOnline: true, noGitRevCache: true` |
+| 只查不装 | `opencode plugin check` → `server.plugin.check` → `Npm.check`（registry 走 pacote `manifest()` 的 HTTP；git 走 `git ls-remote`） |
+| **钉版本 = 关闭更新检测** | `parse()`：registry 的 `mutable = type !== "version"`，git 的 `mutable = !isCommit(committish)`；而 `Npm.check` 里 `if (!target.mutable) return false` ⇒ 钉了精确版本 / 40 位 SHA 就永远报「最新」 |
+| 「自动更新」开关 | **不存在**。全仓 `autoUpdate` 只出现在 V1 的应用自更新配置与桌面端 electron updater，与插件无关 |
+
+**结论**：`package` 写不写版本都**不会自动更新**；只有**不钉版本**（mutable）时才**能被检测到有新版**，再用 `opencode plugin update` 升级。要可复现就钉版本，代价是不再提示新版。
+
+**Windows 弹窗的真正触发点**：只有**需要解析未钉版本的 git 源**时才 spawn `git ls-remote` —— 即首次安装、以及 `opencode plugin check` / `update`。registry 包的解析与检查都走 HTTP ⇒ **npm 安装路径不会有这个弹窗**；钉满 commit SHA 的 git 源也能跳过解析。
+
 ---
 
 ## 4. 验证手段的坑（排查插件时最容易误判）
 
 ### 4.1 `opencode plugin list` 不能用来判断「加载成功」
 
-- 它读**后台 service 的缓存**，且**不枚举配置里的插件** ⇒ 「没列出」是无效信号。
+- 它读**后台 service 的缓存**，反映的是「服务当前装着什么」，而不是「本次热重载是否成功」⇒ 「没列出」是无效信号。
+- **2026-09-25 实测更正**：它**确实会列出配置里的包插件**（`ID  VERSION  SOURCE` 三列，如 `opencode-goal  0.1.0  @justsilver/opencode-goal-plugin`），发现式安装的本地插件列成 `local`。但仍是缓存视图，**判定「最新代码有没有生效」要看日志**。
 - 可靠判据：`opencode api --standalone --print-logs GET /api/plugin`，看 `msg="loading plugin"` / `WARN failed to load plugin`；必要时先 `opencode service restart`。
 - `GET /api/plugin` 是 location-scoped 的（返回体里有 `location.directory`）。
 

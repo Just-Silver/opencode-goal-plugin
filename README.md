@@ -13,7 +13,7 @@
 ```jsonc
 {
   "plugins": [
-    { "package": "@justsilver/opencode-goal-plugin", "options": {} }
+    { "package": "@justsilver/opencode-goal-plugin" }
   ]
 }
 ```
@@ -72,7 +72,7 @@
 - **本地目录**（改代码即热重载，开发用）：
   `{ "package": "<本仓库路径>" }`
 
-固定版本用 `@justsilver/opencode-goal-plugin@0.1.0`；升级用 `opencode plugin update @justsilver/opencode-goal-plugin`。
+不写版本时**安装时**取 `latest`；**不会自动更新** —— 升级用 `opencode plugin update @justsilver/opencode-goal-plugin`，先看有没有新版用 `opencode plugin check`。要完全可复现就钉版本（`@justsilver/opencode-goal-plugin@0.1.0`，代价：不再提示新版）。
 安装与入口解析的内部细节（缓存路径、`files` 过滤、两种入口的差别）见 `docs/opencode/plugin-dev-gotchas.md` §3。
 
 ## 调试

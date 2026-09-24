@@ -15,7 +15,7 @@
 
 ### [ ] #50868 未钉版本的 git 插件，冷启动更新检查会弹 Windows 控制台窗口
 
-**现象**：`opencode.json(c)` 的 `plugins` 里写**未钉版本**的 git 源（如 `github:owner/repo`），opencode 共享服务 cold start 做插件更新检查时会 spawn `git ls-remote` —— **没设 `windowsHide` / `CREATE_NO_WINDOW`** → Windows 上弹出可见控制台窗口（一闪）。清掉 `~/.cache/opencode/npm/**` 后重启（触发强制重装）会弹更多次（上游报告实测 3 次）。
+**现象**：`opencode.json(c)` 的 `plugins` 里写**未钉版本**的 git 源（如 `github:owner/repo`）时，凡**需要解析该 spec** 的场合（首次安装、`opencode plugin check`、`opencode plugin update`）都会 spawn `git ls-remote` 且未设 `windowsHide` / `CREATE_NO_WINDOW` → Windows 上弹出可见控制台窗口（一闪）。清掉 `~/.cache/opencode/npm/**` 后重启（强制重装，每个 location 各一次）会弹更多次（上游报告实测 3 次）。
 
 **上游**：<https://github.com/anomalyco/opencode/issues/50868>（`server: unpinned plugin update check flashes visible git console window on Windows`）
 
@@ -43,7 +43,7 @@
 **动作**：
 
 - [x] README 已写明：git spec 要 pin 40 位 SHA + Windows 弹窗提示（2026-09-25）
-- [ ] 跟踪上游 #50868；上游关闭后回归验证（**去掉 pin** → `opencode service restart` → 看是否仍弹）
+- [ ] 跟踪上游 #50868；上游关闭后回归验证（**去掉 pin** 并清掉 `<cache>/npm/git-*` 后重启，或直接跑 `opencode plugin check` → 看是否仍弹）
 - [ ] 若上游长期不修：评估在 README 更醒目处提示，或改为推荐发现式 / npm 安装
 
 **备注**：本插件自身**不 spawn 任何进程**（全仓 `child_process` / `spawn(` / `exec(` / `Bun.spawn` / `fork(` 均 0 命中；运行时 import 只有相对路径 + 宿主提供的 `@opencode/plugin` 类型），所以这个弹窗 100% 来自宿主 / 依赖层。
