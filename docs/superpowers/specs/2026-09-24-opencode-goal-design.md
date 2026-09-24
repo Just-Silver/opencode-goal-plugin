@@ -118,7 +118,7 @@ goal({
 ## 8. 续跑与上下文注入
 
 - **触发**：目标 active 且会话空闲（`session.status = idle`）；轮末才续，**不打断**。
-- **轮边界/结果**：`Session.Message.Idle{ outcome: succeeded|failed|interrupted }` 标记轮边界（两个 Idle 标记之间的 step 属同一轮）；**`interrupted` → `paused`**（宿主给定，非启发式）。
+- **轮边界/结果**：轮边界 = `session.status` 的 `busy → idle` 转换；中断 = `session.execution.interrupted`（等价于 `Session.Message.Idle` 的 `outcome: interrupted`）→ **`paused`**（宿主给定，非启发式）。
 - **会话恢复**默认不自动续。
 - **续跑轮**：注入完整 continuation prompt（XML 转义 objective + 预算 + 完成审计 + blocked 门槛）。
 - **常态（普通轮）**：只注入**轻量**提醒（"有 active 目标 → 先 `get_goal`；仅 active 才继续"），**不塞 objective**。
