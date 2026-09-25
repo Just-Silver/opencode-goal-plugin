@@ -128,3 +128,32 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 - [ ] 若上游长期不修：评估在 `CONTRIBUTING.md` 更醒目处提示（README 已默认为 npm 安装，不再暴露 git 方式）
 
 **备注**：本插件自身**不 spawn 任何进程**（全仓 `child_process` / `spawn(` / `exec(` / `Bun.spawn` / `fork(` 均 0 命中；运行时 import 只有相对路径 + 宿主提供的 `@opencode/plugin` 类型），所以这个弹窗 100% 来自宿主 / 依赖层。
+
+### [ ] 泄漏 / reload 相关上游 issue 跟踪（#36677 / #48121 / #47114 / #51128）
+
+> 2026-09-25 用 `gh` 复核：**4 条全部 OPEN，没有任何一条有已合并的修复 PR**。
+
+| Issue | 标题 | 状态 | 修复 PR | PR 状态 |
+| --- | --- | --- | --- | --- |
+| [#36677](https://github.com/anomalyco/opencode/issues/36677) | core: long-lived V2 server enters persistent allocation loop | OPEN（bug/perf/core/2.0） | #38825 关闭 promise 插件事件订阅 | CLOSED **未合并** |
+| | | | #38939 allBounded 监听器泄漏 | CLOSED **未合并**（旧 PR 自动清理） |
+| | | | #46179 避免 LocationActivity 热路径 Effect 分配 | CLOSED **未合并**（2h 未更新被自动关） |
+| [#48121](https://github.com/anomalyco/opencode/issues/48121) | core: concurrent location plugin reloads crash with `r.base.get` | OPEN（2.0） | 无 | — |
+| [#47114](https://github.com/anomalyco/opencode/issues/47114) | providers: request falls back to anthropic (401) after plugin hot-reload | OPEN（2.0） | 无 | — |
+| [#51128](https://github.com/anomalyco/opencode/issues/51128) | Plugin reload during a turn fails the step retry | OPEN | #51133 每个 runner step 前等插件激活 | **OPEN**（target `v2`） |
+
+- #38825 被维护者以「该泄漏路径已不可达」关闭（称 `ctx.event.subscribe` 随 namespaced hook API 移除）。**但那修的是「Promise 插件 `for await` 未调 `return()`」，与本插件的「`refCount>0` 时 cleanup 根本不被调用」是两条路径。**
+- 本仓库 2026-09-25 已就 #36677 补充探针复现与根因：<https://github.com/anomalyco/opencode/issues/36677#issuecomment-5826615158>
+- **动作**：跟踪上游；若 #51133 / #36677 关闭并回归验证后删条目。
+
+### [ ] 升级复核：`ctx.event`（单数）是否仍存在（可能被 namespaced hook API 取代）
+
+**背景**：维护者在 #38825 关闭说明（2026-07-25）称，`ctx.event.subscribe()` 随 namespaced hook API（`909a1a6d7`）落地已被移除，`PluginContext` 已无 `event` 字段，`packages/plugin/src/v2/effect/event.ts` 是未接线的孤儿类型。
+
+**现状（2026-09-25，opencode v2.0.15）**：本插件 `ctx.event.subscribe({ signal })` **仍可用** —— 本地 externals 的 `PromiseContext["event"]["subscribe"]` 仍在，真机实测在收事件、续跑正常。**暂时无需改动。**
+
+**注意（勿轻信）**：该说法出自 **7 月的旧评论，可能已过时**；且 #38825 针对 `dev` 分支，我们跑的是 `v2` 分支，两条分支未必同步。
+
+**待办**：每次升级 opencode 前复核 `PluginContext` 是否仍有 `event`；若被移除，迁移到 namespaced hook API 或等价的事件订阅入口。
+
+**验证**：升级后跑 `bun scripts/smoke-api.mjs --session <sid>`，全量应 9/9；若事件订阅 API 变更，续跑/记账会直接失效。
