@@ -204,4 +204,13 @@ describe("createGoalTool", () => {
     const tool = createGoalTool(makeDeps())
     await expect(tool.execute({}, ctx)).rejects.toThrow(/op must be one of/)
   })
+
+  test("tool description and parameter descriptions follow the language", () => {
+    const en = createGoalTool(makeDeps())
+    const zh = createGoalTool({ ...makeDeps(), messages: messagesFor("zh-CN") })
+    expect(en.description).toContain("persistent goal")
+    expect(zh.description).toContain("持久目标")
+    expect(zh.input.properties.op.description).toContain("操作")
+    expect(zh.input.properties.objective.description).toContain("目标正文")
+  })
 })

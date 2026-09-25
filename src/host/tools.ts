@@ -1,3 +1,4 @@
+import type { Messages } from "../i18n/messages"
 import { applyBlocker } from "../model/blocked"
 import { complete, createGoal, resume } from "../model/goal"
 import { applyBudget } from "../model/limits"
@@ -12,17 +13,23 @@ import type { GoalDeps } from "./deps"
 export const GOAL_TOOL_NAME = "goal"
 
 /** 宿主按 JSON Schema 解析；用 any 避免与 effect 的 JsonSchema 类型耦合。 */
-export const goalToolInput: any = {
-  type: "object",
-  properties: {
-    op: { type: "string", enum: ["create", "get", "complete", "resume", "drop", "block"] },
-    objective: { type: "string" },
-    token_budget: { type: "integer", minimum: 1 },
-    blocker_key: { type: "string" },
-    blocker: { type: "string" },
-  },
-  required: ["op"],
-  additionalProperties: false,
+export function goalToolInput(messages: Messages): any {
+  return {
+    type: "object",
+    properties: {
+      op: {
+        type: "string",
+        enum: ["create", "get", "complete", "resume", "drop", "block"],
+        description: messages["tool.goal.op"],
+      },
+      objective: { type: "string", description: messages["tool.goal.objective"] },
+      token_budget: { type: "integer", minimum: 1, description: messages["tool.goal.tokenBudget"] },
+      blocker_key: { type: "string", description: messages["tool.goal.blockerKey"] },
+      blocker: { type: "string", description: messages["tool.goal.blocker"] },
+    },
+    required: ["op"],
+    additionalProperties: false,
+  }
 }
 
 export interface GoalToolContext {
@@ -44,9 +51,8 @@ function asContent(value: unknown): { content: string } {
 export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
   return {
     name: GOAL_TOOL_NAME,
-    description:
-      'Manage the persistent goal for this session. op "create" starts a goal only when explicitly requested; "get" reports it; "complete" asserts evidence-backed completion; "resume"/"drop" are also available; "block" reports a recurring blocker.',
-    input: goalToolInput,
+    description: deps.messages["tool.goal.description"],
+    input: goalToolInput(deps.messages),
     async execute(raw, context) {
       const parsed = parseToolArgs(raw)
       if (!parsed.ok) throw new Error(parsed.message)
