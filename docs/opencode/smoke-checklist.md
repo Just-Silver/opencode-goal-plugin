@@ -82,3 +82,16 @@
   - subagent 起：`{"sessionID":"ses_…","status":"running","truncated":false}` ✓
   - subagent 止：`{"source":"subagent","childID":"ses_…","agent":"General","state":"completed"}`；文本 `<subagent sessionID="ses_…" state="completed" …>…</subagent>` ✓
   - **key 对齐**：subagent 起 `sessionID` 与止 `childID` 同值；shell `jobID === shellID` → metadata 主路径与文本兜底的 key 均一致。
+
+## 8. 宿主信号 → 状态真机验收（2026-09-25，V2 子项目 3）
+
+> 会话 `ses_f28ab48e8ffez9TtXXRvmxubIc`（location `C:\Users\13178`）。一次性探针脚本（未提交）经 HTTP API 制造终态失败，用 SSE `/api/event` 抓 `session.execution.failed`。
+
+- **事件送达 + 形状核对**（spec §3.2/§3.6）：
+  - 把会话模型指向不存在路由 → `session.execution.failed` 的 `data.error = {"type":"provider.no-route","message":"Model unavailable: …"}`。**被排除**：目标状态未变、无回执 ✓
+  - 临时加一个坏 API key 的 provider（`probe-bad`，用完已删）→ `data.error = {"type":"provider.auth","message":"Invalid or missing API key","status":401}`（**被映射**，形状含 `status`）✓
+- **端到端（被映射路径）**：预置一个 active 目标 → `provider.auth` 失败后：
+  - 回执 = `Goal marked blocked: Invalid or missing API key. Use /goal-resume after resolving it.` ✓
+  - 目标记录 = `blocked`、`lastError.type = "provider.auth"` ✓
+- **插件已加载**：`/goal-status` 正常返回回执（证明命令面在跑）。
+- **订阅语义**：未直接测「插件重启不重放」；旁证——插件既有的 `session.execution.failed` 结算与 `session.deleted` 清理长期依赖「实时流、不重放」，冒烟回归稳定。spec §8 已记录该残留假设（若确认重放，再加事件时刻/序号护栏）。
