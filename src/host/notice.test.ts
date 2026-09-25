@@ -18,4 +18,9 @@ describe("noticeLine", () => {
   test("does not truncate a detail at exactly the limit", () => {
     expect(noticeLine("L", "y".repeat(10), 10)).toBe(`L · ${"y".repeat(10)}`)
   })
+
+  test("Infinity disables clipping and keeps the full detail", () => {
+    const long = "x".repeat(200)
+    expect(noticeLine("Goal request", long, Number.POSITIVE_INFINITY)).toBe(`Goal request · ${long}`)
+  })
 })

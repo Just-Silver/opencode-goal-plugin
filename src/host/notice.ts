@@ -3,6 +3,9 @@ import { format, type Messages } from "../i18n/messages"
 /**
  * `session.synthetic` 在 TUI 里只渲染 `description`（notice 行，可换行）；
  * `text` 是给模型的完整内容。这里把提示压成便于扫读的一行，避免整段 prompt 刷屏。
+ *
+ * `max` 为裁剪上限（默认 72）；传 `Number.POSITIVE_INFINITY` 表示**不裁剪**——
+ * `/goal <目标>` 用它显示用户提交的完整目标（TUI 会自动换行）。
  */
 export function noticeLine(label: string, detail: string, max = 72): string {
   const flat = detail.replace(/\s+/g, " ").trim()

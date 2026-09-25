@@ -101,7 +101,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
       await port.deliver({
         sessionID: input.sessionID,
         text: goalCommandPrompt(parsed.objective ?? ""),
-        description: noticeLine(deps.messages["label.goalRequest"], parsed.objective ?? ""),
+        description: noticeLine(deps.messages["label.goalRequest"], parsed.objective ?? "", Number.POSITIVE_INFINITY),
       })
     },
     status,

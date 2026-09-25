@@ -84,6 +84,14 @@ describe("createCommandHandlers", () => {
     expect(descriptions[0]).toBe("Goal request · ship it")
   })
 
+  test("the goal request notice shows the full objective (no clipping)", async () => {
+    const { handlers, descriptions } = makeHandler()
+    const objective = "从当前空文件夹开始，创建一个完整、可运行的 C# .NET 10 CLI 待办事项项目。这个任务必须经历多个阶段，不能在完成第一版代码后直接结束。"
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: objective } })
+    expect(descriptions[0]).toBe(`Goal request · ${objective}`)
+    expect(descriptions[0]).not.toContain("…")
+  })
+
   test("an empty goal argument reports the status instead of prompting the model", async () => {
     const { deps, handlers, notices, prompts } = makeHandler()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
