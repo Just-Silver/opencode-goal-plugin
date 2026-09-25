@@ -1,14 +1,14 @@
 # opencode-goal V2 子项目 3 设计：宿主信号 → 状态
 
 - 日期：2026-09-25
-- 状态：**待审阅**
+- 状态：**已定稿（独立子代理审阅 Approved，2026-09-25）**
 - 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.16`；宿主源码检出 `../Externals/opencode`）
 - 上级：V2 里程碑（`1 发布收尾 → 2 后台 deferral → 3 signals → 5 TUI 侧边栏`；`4 跨会话列表` 与 `6 i18n` 已砍）
 - 相关：`docs/superpowers/specs/2026-09-24-opencode-goal-design.md`（v1，§9 宿主信号）、`docs/01-design-orientation.md` §4/§7、`docs/opencode/known-issues.md`、`docs/superpowers/specs/2026-09-25-opencode-goal-v2-background-deferral-design.md`
 
 ## 1. 背景与问题
 
-本插件当前只对**成功**结束的轮做状态推进：`session.execution.succeeded` 时结算 + 续跑；`session.execution.failed` 时**只结算**（不续跑、不改状态，见 `src/host/events.ts`）。因此，当一轮因**宿主终态错误**失败时：
+本插件当前只对**成功**结束的轮做状态推进：`session.execution.succeeded` 时结算 + 续跑；`session.execution.failed` 时**只结算**（不续跑、**不因宿主错误改状态**——注意既有结算路径里的空转计数仍可能独立把 active 置 blocked，见 `model/empty.ts`）。因此，当一轮因**宿主终态错误**失败时：
 
 - 目标仍停在 `active`；用户只看到宿主的报错，**不知道目标其实已经无法推进**；
 - 用户下一条消息会让目标继续，若错误未解决会**再次失败**（不会跑飞，但没有「停」的语义）；
@@ -151,9 +151,11 @@ export function applyHostSignal(goal: Goal, now: number, signal: HostSignal): Go
 2. **信号（无论 `turnOpen` 与否）**：从 `data.error` 取 `hostSignal(event.data.error)`；命中则 `save(sessionID, (goal, now) => applyHostSignal(goal, now, signal))`。
    - 不依赖 `turnOpen`：插件重启后接入时 `turnOpen` 为 false，但终态错误仍应改状态。
    - `save()` 内部会再跑 `applyBudget`（§4.3 的优先级在 `save` 里统一生效）。
-3. **回执**：仅当**状态确实发生翻转**（`save` 前后 `status` 不同）时，发一条纯回执 `notify`（`resume:false`）：
-   - usage-limited：`Goal marked usage-limited: <message>. Use /goal-resume after the limit resets.`
-   - blocked：`Goal marked blocked: <message>. Use /goal-resume after resolving it.`
+3. **回执**：仅当**状态确实发生翻转**时，发一条纯回执 `notify`（`resume:false`）：
+   - **判翻转的实现**：信号分支先 `load` 一次记下 `before.status`；`save` 后再 `load` 一次取**最终** `status`（`save` 内的 `applyBudget` 可能把它升级为 `budget-limited`）；两者不同才发。避免依赖 `save` 的中间态。
+   - 文案按**最终** `status` 生成：
+     - `usage-limited`：`Goal marked usage-limited: <message>. Use /goal-resume after the limit resets.`
+     - `blocked`：`Goal marked blocked: <message>. Use /goal-resume after resolving it.`
    - `message` 为空时省略 `: <message>` 一段，避免出现 `marked blocked: .`。
    - 实现：给 `createEventRouter` 增加第三个参数 `notify`（`server.ts` 已有一个 `notify`，直接传入）。
 
@@ -204,7 +206,7 @@ export function applyHostSignal(goal: Goal, now: number, signal: HostSignal): Go
 - `model/signals.test.ts`：映射表逐项（quota → usage-limited；auth/content-filter/invalid-request → blocked；no-route/timeout/unsupported/rate-limit/internal/transport/invalid-output/unknown/非对象 → undefined）；`applyHostSignal` 的「仅 active/blocked 接受」「记 lastError」「不改 blocker 字段」。
 - `model/goal.test.ts`：从 `usage-limited` resume；resume 清 `lastError`。
 - `model/limits.test.ts`：`usage-limited` 可被预算升级为 `budget-limited`。
-- `host/events.test.ts`（真实 router）：quota 的 failed → `usage-limited` + 回执 + 不续跑；auth → `blocked` + 回执；rate-limit/unknown/no-route → 状态不变、无回执；非 active（paused/complete/budget-limited）→ 不变；`turnOpen=false` 时仍改状态；`failed` 仍结算记账。
+- `host/events.test.ts`（真实 router）：quota 的 failed → `usage-limited` + 回执 + 不续跑；auth → `blocked` + 回执；rate-limit/unknown/no-route → 状态不变、无回执；非 active（paused/complete/budget-limited）→ 不变；**已在 `usage-limited` 再来一个 host 信号 → 不变、无回执**；`turnOpen=false` 时仍改状态；`failed` 仍结算记账。
 - `host/commands.test.ts`：`statusLine` 展示 `lastError`。
 - `store/repository.test.ts`：`lastError` 往返；畸形 `lastError` 被丢弃但目标保留。
 - `model/tool-result.test.ts`（若存在）：`view` 透传 `lastError`。
@@ -232,3 +234,4 @@ export function applyHostSignal(goal: Goal, now: number, signal: HostSignal): Go
 ## 10. 修订记录
 
 - **2026-09-25（初稿）**：经 docs / 宿主源码 / GitHub 三侧核实，确定 V2 唯一可靠终态错误信号为 `session.execution.failed.data.error`；映射范围定为 `provider.quota → usage-limited` + `{auth, content-filter, invalid-request} → blocked`；排除 `no-route`（热重载陷阱）等；不加配置、不做自动恢复、不干预重试。
+- **2026-09-25（独立子代理审阅，Approved）**：并入 4 条改进：① §1 措辞更正（`failed` 路径并非绝对不改状态——空转计数仍可独立置 blocked）；② §4.4 点明「判翻转」的实现（前后各 load 一次、按最终 status 生成回执）；③ §7 补「已在 usage-limited 再来信号 → 不变、无回执」用例；④ 回执文案按最终 status（含 `applyBudget` 升级）。
