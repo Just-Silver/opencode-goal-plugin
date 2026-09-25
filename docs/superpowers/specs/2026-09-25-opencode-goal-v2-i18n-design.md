@@ -1,7 +1,7 @@
 # opencode-goal V2 子项目设计：国际化（i18n）
 
 - 日期：2026-09-25
-- 状态：**已定稿（独立子代理审阅后修订，2026-09-25）**
+- 状态：**已实现（2026-09-25）**
 - 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.16`；宿主源码检出 `../Externals/opencode`）
 - 上级：V2 里程碑。**说明**：早先文档把 i18n 列为「已砍」，本设计将其**恢复为独立子项目并优先实现**（用户决定）。
 - 相关：`docs/superpowers/specs/2026-09-24-opencode-goal-design.md`（v1，§1 非目标提到 i18n）、`docs/01-design-orientation.md` §4/§7、`docs/opencode/config-install.md`、`docs/opencode/known-issues.md`

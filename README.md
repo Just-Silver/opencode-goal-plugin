@@ -45,6 +45,7 @@
 | `command_name` | `goal` | 主命令名；状态控制是派生命令 `<name>-status` / `-pause` / `-resume` / `-clear` |
 | `debug_command_name` | `goal-debug` | 调试命令名 |
 | `debug` | `true` | 注册只读调试工具 `goal_debug`（设 `false` 可让模型工具表保持干净） |
+| `language` | 跟随系统 | 面向用户文案的语言，`"zh-CN"` 或 `"en"`（缺省用系统 locale 探测） |
 
 ---
 

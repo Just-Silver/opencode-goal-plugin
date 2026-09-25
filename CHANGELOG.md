@@ -8,6 +8,7 @@
 
 - **后台任务 deferral**：后台 shell / 后台 subagent 运行期间，轮末**不再**自动续跑；宿主完成通知（`session.inbox.enqueued`）到达后恢复。起/止信号取自工具结果 metadata（`status:"running"`）与完成通知 metadata（`source:"shell"|"subagent"`），并带最外层标签文本兜底与乱序护栏。纯内存、不落 KV、不加配置项、不做超时放行（依赖宿主「完成即唤醒」保证）。
 - **宿主终态信号 → 状态**：一轮因宿主终态错误失败（`session.execution.failed`）时按 `error.type` 改目标状态——配额/限流（`provider.quota`，含 Go/Free 用量上限）→ **`usage-limited`**；确定性拒绝（`provider.auth` / `provider.content-filter` / `provider.invalid-request`）→ **`blocked`**。记录 `lastError`、发一条纯回执、支持 `/goal-resume` 恢复。**排除** `provider.no-route`（与热重载 `ModelUnavailableError` 共用，避免误伤）等；不改配置、不做自动恢复、不干预重试。
+- **国际化（i18n）**：面向用户文案（命令描述、`/goal-*` 回执、状态行、宿主信号回执、`/goal-debug` 输出）与 `goal` 工具描述/参数说明支持中英双语；语言默认跟随系统 locale（`Intl` 探测），可用配置项 `language` 显式覆盖。模型提示词与日志保持英文。
 
 ## [0.1.1] - 2026-09-25
 
