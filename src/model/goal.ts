@@ -1,7 +1,7 @@
 import type { Goal, GoalStatus } from "./types"
 import { emptyUsage } from "./usage"
 
-export type GoalErrorCode = "budget-exceeds-max" | "not-resumable" | "not-completable"
+export type GoalErrorCode = "budget-exceeds-max" | "not-resumable" | "not-completable" | "invalid-budget"
 
 export class GoalError extends Error {
   readonly code: GoalErrorCode
