@@ -44,4 +44,4 @@
 
 ## 5. 自动化场景一览（`scripts/smoke-api.mjs`）
 
-`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty`。
+`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty` / `compaction`。

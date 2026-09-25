@@ -429,6 +429,32 @@ const SCENARIOS = {
     },
   },
 
+  // 压缩：active 目标下触发 session.compact → compaction 钩子不炸、压缩完成、目标存活
+  compaction: {
+    title: "压缩：active 目标下 session.compact 完成（compaction 钩子不炸）且目标存活",
+    run: async (ctx) => {
+      await ctx.clearGoal()
+      await sendGoal(ctx.sid, "调用 goal 工具 op=create，objective 写 compaction 冒烟目标。创建后回复 已创建。")
+      const g = await ctx.waitStatus("active", 90000)
+      check(g, "应建立 active 目标")
+      const m = ctx.events.mark()
+      const res = await api("session.compact", { params: { sessionID: ctx.sid }, body: {} })
+      ctx.log(`compact -> ${JSON.stringify(res).slice(0, 160)}`)
+      const ended = await waitFor(
+        "compaction-ended",
+        () => ctx.events.list.slice(m).find((x) => x.type === "session.compaction.ended" && x.data?.sessionID === ctx.sid),
+        { timeout: 180000, interval: 4000 },
+      )
+      check(ended, "应收到 session.compaction.ended（压缩完成）")
+      check(typeof ended.data?.text === "string" && ended.data.text.length > 0, `压缩应产出摘要：${JSON.stringify(ended.data).slice(0, 200)}`)
+      const after = await ctx.goal()
+      check(after, "压缩后目标应仍存在")
+      check(after.status === "active", `压缩后目标应仍 active，实际 ${after.status}`)
+      await control(ctx.sid, "clear")
+      await sleep(1500)
+    },
+  },
+
   // 启动兜底 reconcile：孤儿记录（会话不存在 + 超保护窗）在 reload 后消失，活记录保留
   reconcile: {
     title: "reconcile 冷启动：孤儿 KV（会话不存在）reload 后消失，活记录不被误删",

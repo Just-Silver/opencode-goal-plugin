@@ -4,10 +4,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- `/goal-debug events` / `sessions` 的时间戳改为**本地墙钟时间**（`HH:mm:ss.SSS`）；原先用 `toISOString()` 输出 UTC，与本地时间差一个时区，纯属显示误导。
-
 ## [0.1.1] - 2026-09-25
 
 ### Changed
@@ -20,6 +16,11 @@
 ### Added
 
 - 目标记录新增可选 `usage` 分项（`input` / `output` / `reasoning` / `cacheRead` / `cacheWrite`）。旧记录没有该字段，只显示总量。
+
+### Fixed
+
+- `/goal-debug events` / `sessions` 的时间戳改为**本地墙钟时间**（`HH:mm:ss.SSS`）；原先用 `toISOString()` 输出 UTC，与本地时间差一个时区，纯属显示误导。
+- **reload 泄漏旧插件激活导致的 N 倍续跑与内存增长**（宿主在 location 活跃时 reload 不调旧代际 cleanup）：插件侧加**进程级代际守卫**（`globalThis` 共享、按 location 记录当前代际 + AbortController），新一代 setup 先 abort 旧代；事件循环与钩子校验 `isCurrent()`，cleanup 只有当班才注销。根因与探针证据见 `docs/opencode/known-issues.md`，上游 issue #36677。
 
 ### 注意
 
