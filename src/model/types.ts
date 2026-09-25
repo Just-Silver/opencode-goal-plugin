@@ -1,4 +1,4 @@
-export type GoalStatus = "active" | "paused" | "blocked" | "budget-limited" | "complete"
+export type GoalStatus = "active" | "paused" | "blocked" | "budget-limited" | "usage-limited" | "complete"
 
 /** 累计 token 分项（0.1.1 起记录；旧记录可能没有）。`tokensUsed` = 五项之和。 */
 export interface GoalUsage {
@@ -7,6 +7,13 @@ export interface GoalUsage {
   readonly reasoning: number
   readonly cacheRead: number
   readonly cacheWrite: number
+}
+
+/** 宿主终态信号落下的最近一次错误（展示用；与模型报障的 blocker* 字段无关）。 */
+export interface GoalLastError {
+  readonly type: string
+  readonly message: string
+  readonly at: number
 }
 
 export interface Goal {
@@ -23,6 +30,8 @@ export interface Goal {
   readonly blockerText?: string
   readonly blockerStreak: number
   readonly emptyStreak: number
+  /** 最近一次宿主终态错误；仅由 host 信号写入，resume 时清空。 */
+  readonly lastError?: GoalLastError
   readonly lastContinuationAt?: number
   readonly createdAt: number
   readonly updatedAt: number
