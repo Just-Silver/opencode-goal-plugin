@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { GoalError, complete, createGoal, pause, resume } from "./goal"
+import { GoalError, complete, createGoal, pause, recordContinuation, resume } from "./goal"
 
 const base = { goalId: "g1", objective: "finish the thing", now: 1000 }
 
@@ -90,5 +90,22 @@ describe("transitions", () => {
     const paused = pause(done, 3000)
     expect(paused.status).toBe("complete")
     expect(paused.updatedAt).toBe(2000)
+  })
+})
+
+describe("recordContinuation", () => {
+  test("counts from zero when the field is absent (legacy record)", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 0 })
+    const next = recordContinuation(goal, 111)
+    expect(next.continuations).toBe(1)
+    expect(next.lastContinuationAt).toBe(111)
+    expect(next.updatedAt).toBe(111)
+  })
+
+  test("increments an existing count without mutating the input", () => {
+    const goal = { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), continuations: 3 }
+    const next = recordContinuation(goal, 5)
+    expect(next.continuations).toBe(4)
+    expect(goal.continuations).toBe(3)
   })
 })

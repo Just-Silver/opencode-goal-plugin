@@ -70,3 +70,11 @@ export function complete(goal: Goal, now: number): Goal {
   if (goal.status !== "active") throw new GoalError("not-completable", `not-completable: cannot complete a ${goal.status} goal`)
   return next(goal, "complete", now)
 }
+
+/**
+ * 落账一次自动续跑：计数 +1，并刷新 `lastContinuationAt` / `updatedAt`。
+ * 口径 = 目标生命周期累计：`resume` / 暂停 / 各种停下都不重置。
+ */
+export function recordContinuation(goal: Goal, now: number): Goal {
+  return { ...goal, continuations: (goal.continuations ?? 0) + 1, lastContinuationAt: now, updatedAt: now }
+}

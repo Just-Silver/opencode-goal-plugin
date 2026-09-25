@@ -33,6 +33,8 @@ export interface Goal {
   /** 最近一次宿主终态错误；仅由 host 信号写入，resume 时清空。 */
   readonly lastError?: GoalLastError
   readonly lastContinuationAt?: number
+  /** 自动续跑累计次数；旧记录（0.3.0 前）没有 → 读取时按 0 处理。 */
+  readonly continuations?: number
   readonly createdAt: number
   readonly updatedAt: number
 }
