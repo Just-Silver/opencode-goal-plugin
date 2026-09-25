@@ -133,9 +133,10 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
 - 读 `metadata = data.item.payload.metadata`：
   - `metadata.source === "shell"` 且 `metadata.shellID` 存在 → 按该 key 移除。
   - `metadata.source === "subagent"` 且 `metadata.childID` 存在 → 按该 key 移除。
-- 命中移除时，把该 key 记入短时效集合 `recentlyCompleted`（供 §4.2 乱序护栏查；保留若干秒后过期）。
+- **写入 `recentlyCompleted`**：**只要能解析出 id（metadata 命中或文本兜底），就把该 key 记入 `recentlyCompleted`（保留 30 秒）——无论是否成功从 pending 移除**。这是 §4.2 护栏生效的前提：完成通知先到时 key 尚未入 pending、「移除」是 no-op，但记录必须留下。
+- 同 key 复用**不会发生**：后台 shell 的 key 是全局唯一的 `Shell.ID`（时间+随机，`packages/core/src/shell.ts`），后台 subagent 的 key 是每次新建的子会话 id → `recentlyCompleted` 不会误挡合法的重新开始。
+- **文本兜底**：只要该条 synthetic **未能按 metadata 命中 pending**（无论有无 `source`）→ 再用通知文本形状取 id（`<shell id="…" …>` / `<subagent sessionID="…" …>`），命中则按该 id 移除；仍取不到则忽略。只解析通知**最外层**标签（或要求解析出的 id 与 metadata id 一致），避免命中通知**正文**里恰好出现的同名标签。
 - **key 未命中（含「无匹配」与「用户 `!命令` 的 shell 通知」）→ 忽略，不清理**（见下方「为什么不 clear-all」）。
-- **文本兜底**：只要该条 synthetic **未能按 metadata 命中 pending**（无论有无 `source`）→ 再用通知文本形状取 id（`<shell id="…" …>` / `<subagent sessionID="…" …>`），命中则按该 id 移除；仍取不到则忽略。
 
 > **为什么不 clear-all**：用户 `!命令` 的完成通知同样带 `{source:"shell", shellID}`，其 `shellID` 从未进入 pending。若「key 未命中就清空该会话 pending」，会把同会话中真正在跑的后台任务一并抹掉 → 下次 `execution.succeeded` 提前续跑，**直接破坏本设计的核心目标**。故只做**按 key 移除**。
 
@@ -224,3 +225,4 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
   2. §4.3 文本兜底改为「只要未按 metadata 命中就尝试」，不再要求 `source` 缺失；
   3. §4.4 `session.deleted` 顺带移除「以该 sessionID 为 key」的所有 pending 项（子会话先删的场景）；
   4. §4.6 确保仅剩 pendingBackground 的会话也进入 `diagnostics()`；§7 补乱序与子会话删除两条单测。
+- **2026-09-25（第三轮独立审阅）**：抓出 `recentlyCompleted` 写入时机与护栏目标**自相矛盾**（原写「命中移除时才记」，而护栏要防的恰是「key 尚未入 pending、移除为 no-op」→ 记录不会留下 → 护栏失效）。已修：**只要能解析出 id 就记入 `recentlyCompleted`，与是否成功移除解耦**；并定 TTL = 30 秒、补「同 key 不会复用」结论、文本兜底限定最外层标签。
