@@ -143,4 +143,12 @@ describe("createDebug", () => {
     expect(text).toContain("会话：ses_1")
     expect(text).not.toMatch(/\{[a-zA-Z]+\}/)
   })
+
+  test("the usage line follows the injected language", async () => {
+    const deps = { ...makeDeps(), messages: messagesFor("zh-CN") }
+    const { debug } = makeDebug(deps)
+    const text = await debug.render("", "ses_1")
+    expect(text).toContain("调试")
+    expect(text.split("\n")).toHaveLength(1)
+  })
 })

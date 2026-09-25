@@ -204,7 +204,7 @@ export function format(template: string, params: Record<string, string | number>
 | `debug.yes` | yes | 是 |
 | `debug.no` | no | 否 |
 
-> `{goal}` 的值（`status, emptyStreak=…, blockerStreak=…`）保持**原始 token**（调试用，不本地化状态词）。
+> `{goal}` 的值（`status, emptyStreak=…, blockerStreak=…`）与 `debug.sessions` 行里的 `goal.status` 均保持**原始 token**（调试用，不本地化状态词）。
 
 ### 5.6 工具描述与参数说明（`tools.ts` / `server.ts`）
 
@@ -273,3 +273,4 @@ export function format(template: string, params: Record<string, string | number>
 
 - **2026-09-25（初稿）**：确认宿主不提供 locale、系统 locale 可探测；确定「每语言一 TS 模块 + 键值字典 + `{占位符}` + `format`」；默认跟随系统 + `language` 覆盖；范围 = 用户可见文案 + 工具描述/参数说明（不含模型提示词/工具错误/工具输出）；完成全部文案清单。
 - **2026-09-25（独立子代理审阅后修订，并入 8 条）**：① §6 修正 `server.test.ts` 适配（走 `setup`，须显式 `language: "en"`，否则被系统 locale 带成中文）；② §5.5 补 3 处遗漏的用户可见调试字符串（新增 `debug.unknown` / `debug.noTrackedState`，原「Unknown debug subcommand」更名 `debug.unknownSubcommand`）；③ §1 措辞（并非全英文，`debug.usage` 已中英混排）；④ §9 更正宿主 UI 有独立 i18n、只是不暴露给插件，并在 §8 补该风险；⑤ §2/§5 明确配置校验错误与 `console.error` 日志保持英文（非目标）；⑥ §5.4 `signalNotice` 形参收窄为三值联合并在调用点 guard；⑦ §6 新增占位符对齐与无残留测试；⑧ §3.5 `notice.nothingToPause/Resume` 的 `{status}` 也走 `statusLabel`。
+- **2026-09-25（已实现）**：8 个任务全部落地（`eb894d9`..`6a67633`）；全量 `bun test` 252 pass / 0 fail、`tsc` 0 错；真机核对通过（系统 locale `zh-CN` → 中文回执，见 `docs/opencode/smoke-checklist.md` §9）。最终整支分支审查 Ready to merge = Yes；并入 Minor（补强嵌套占位符用例、补 zh 用法断言、本修订记录）。

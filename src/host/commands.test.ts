@@ -192,8 +192,15 @@ describe("createCommandHandlers", () => {
 
   test("a rendered status line leaves no placeholders", async () => {
     const { deps, handlers, notices } = makeHandler()
-    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }))
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }),
+      tokensUsed: 30,
+      usage: { input: 10, output: 20, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      lastError: { type: "provider.quota", message: "limit", at: 1 },
+    })
     await handlers.status("ses_1")
     expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
+    expect(notices[0]).toContain("new work")
+    expect(notices[0]).toContain("last error: limit")
   })
 })
