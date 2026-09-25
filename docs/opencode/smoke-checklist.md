@@ -67,3 +67,14 @@
 **发布（OIDC 真实发布）**：**2026-09-25 已发布 `0.1.1`** —— tag `v0.1.1` → CD 走 OIDC，npm `@justsilver/opencode-goal-plugin@0.1.1` 已上线（`latest = 0.1.1`、provenance 已签名并写入 sigstore 透明日志），GitHub Release `v0.1.1` 已建。
 
 **npm 渠道升级验证**：`opencode plugin add` 已验证可用（从 registry 解析并安装 `0.1.0`）；`opencode plugin check` / `update` 的端到端验证受本机**共享 host server** 限制（CLI 复用已在跑的 server，读的是真实全局配置，临时 `OPENCODE_CONFIG_DIR` / `OPENCODE_TEST_HOME` 均无法隔离），**未完成**。该路径是宿主行为（本插件无任何相关代码），建议在干净环境（独立 HOME + 无在跑 server）补测。
+
+## 7. 后台 deferral 真机验收（2026-09-25，V2 子项目 2）
+
+> 会话 `ses_f28ab48e8ffez9TtXXRvmxubIc`（location `C:\Users\13178`），模型 `xiaomi/mimo-v2.6-flash`。
+
+- `background` 场景 **PASS**（39.5s）：模型 `shell {background:true}` 起后台 `sleep 30`；**后台运行期间 auto-continue 回执 = 0**（defer 生效）；完成通知唤醒后目标收尾。
+  - 注：该场景**不**硬断言「完成后必有 auto-continue」——模型可能在宿主唤醒轮里直接 `goal(complete)` 收尾（本次实测即如此），此时 0 条属正常。
+- `continuation` 回归 **PASS**（15.3s）：`execution.succeeded=3`、auto-continue 回执 = 2 → `cont <= succeeded` 成立（代际护栏无回归）。
+- **真机 metadata 形状核对**（spec §3.2 要求，防「假形状遮真 bug」）：
+  - 起：`session.tool.success` 的 `data.metadata` = `{"status":"running","truncated":false,"shellID":"sh_0d7551627001SrTwPQEgLzT8y5"}` —— 与假定一致。
+  - 止：完成通知为 synthetic，文本 `<shell id="sh_…" state="completed" command="…">…</shell>` —— 与文本兜底正则（`^\s*<shell\b[^>]*\sid="…"`）一致。
