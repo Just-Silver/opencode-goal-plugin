@@ -67,3 +67,15 @@ describe("buildToolResult", () => {
     expect(buildToolResult(goal).goal.lastError).toEqual({ type: "provider.quota", message: "weekly usage limit", at: 7 })
   })
 })
+
+describe("continuations", () => {
+  test("defaults to 0 for a legacy goal without the field", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 0 })
+    expect(buildToolResult(goal).goal.continuations).toBe(0)
+  })
+
+  test("exposes the accumulated count", () => {
+    const goal = { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), continuations: 3 }
+    expect(buildToolResult(goal).goal.continuations).toBe(3)
+  })
+})

@@ -10,6 +10,8 @@ export interface GoalView {
   /** 分项累计；旧记录（0.1.0 及以前）为 null。 */
   readonly usage: GoalUsage | null
   readonly timeUsedSeconds: number
+  /** 自动续跑累计次数。 */
+  readonly continuations: number
   readonly blockerKey: string | null
   readonly blockerText: string | null
   readonly lastError: GoalLastError | null
@@ -48,6 +50,7 @@ export function buildToolResult(goal: Goal): ToolResult {
       tokensUsed: goal.tokensUsed,
       usage,
       timeUsedSeconds: goal.timeUsedSeconds,
+      continuations: goal.continuations ?? 0,
       blockerKey: goal.blockerKey ?? null,
       blockerText: goal.blockerText ?? null,
       lastError: goal.lastError ?? null,
