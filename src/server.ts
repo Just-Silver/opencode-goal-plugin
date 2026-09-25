@@ -9,6 +9,7 @@ import { acquireGeneration } from "./host/generation"
 import { createCompactionHook, createContextHook } from "./host/hooks"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
+import { messagesFor, resolveLanguage, systemLocale } from "./i18n"
 import { createRepository } from "./store/repository"
 import { isMissingSessionError } from "./store/session-exists"
 import { isSessionID } from "./store/keys"
@@ -20,6 +21,8 @@ export default {
   id: PLUGIN_ID,
   async setup(ctx: Plugin.Context) {
     const options = resolveOptions(ctx.options)
+    const language = resolveLanguage(options.language, systemLocale())
+    const messages = messagesFor(language)
     const repo = createRepository(ctx.storage)
     // 进程级代际：同 location 的新一代会 abort 上一代（宿主在 location 活跃时 reload 不会调旧代
     // 的 cleanup，旧代的事件订阅会泄漏，续跑被重复投递 N 倍且内存只增不减）。见 known-issues。
@@ -29,6 +32,7 @@ export default {
     const deps: GoalDeps = {
       repo,
       options,
+      messages,
       now: () => Date.now(),
       newGoalId: () => crypto.randomUUID(),
       isRestricted: (agentId) => isRestrictedAgent(agentId, options.restrictedAgents),
@@ -67,32 +71,32 @@ export default {
       const name = options.commandName
       editor.add({
         name,
-        description: "Set a persistent goal for this session (empty reports the current goal).",
+        description: messages["cmd.goal"],
         execute: async (input) => handlers.goal({ sessionID: input.sessionID, prompt: { text: input.prompt.text } }),
       })
       editor.add({
         name: `${name}-status`,
-        description: "Report the current goal.",
+        description: messages["cmd.status"],
         execute: async (input) => handlers.status(input.sessionID),
       })
       editor.add({
         name: `${name}-pause`,
-        description: "Pause the active goal.",
+        description: messages["cmd.pause"],
         execute: async (input) => handlers.pause(input.sessionID),
       })
       editor.add({
         name: `${name}-resume`,
-        description: "Resume a paused, blocked, budget-limited, or usage-limited goal.",
+        description: messages["cmd.resume"],
         execute: async (input) => handlers.resume(input.sessionID),
       })
       editor.add({
         name: `${name}-clear`,
-        description: "Clear the goal record.",
+        description: messages["cmd.clear"],
         execute: async (input) => handlers.clear(input.sessionID),
       })
       editor.add({
         name: options.debugCommandName,
-        description: "Read-only diagnostics for the goal plugin (no model turn).",
+        description: messages["cmd.debug"],
         execute: async (input) => {
           const text = await debug.render(input.prompt.text, input.sessionID)
           await notify(input.sessionID, text)
@@ -115,14 +119,13 @@ export default {
       if (options.debug) {
         editor.add({
           name: "goal_debug",
-          description:
-            "DEBUG ONLY — read-only diagnostics for the opencode-goal plugin (which location owns this session, recent event-ownership decisions, stored goals, in-memory turn state). Do NOT call this during normal goal work. Call it only when the user explicitly asks to debug the goal plugin, or when goal auto-continuation misbehaves.",
+          description: messages["tool.debug.description"],
           input: {
             type: "object",
             properties: {
               op: {
                 type: "string",
-                description: "Which diagnostic to render (debug-only; never call speculatively).",
+                description: messages["tool.debug.op"],
                 enum: ["env", "events", "sessions", "state"],
               },
             },

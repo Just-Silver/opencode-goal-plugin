@@ -1,11 +1,14 @@
 import type { TokenDelta } from "../model/usage"
 import type { Options } from "../config"
+import type { Messages } from "../i18n/messages"
 import type { Repository } from "../store/repository"
 
 /** host 层的全部副作用入口，全部注入以便单测。 */
 export interface GoalDeps {
   readonly repo: Repository
   readonly options: Options
+  /** 面向用户文案（语言在 setup 时确定）。 */
+  readonly messages: Messages
   readonly now: () => number
   readonly newGoalId: () => string
   readonly isRestricted: (agentId: string) => boolean

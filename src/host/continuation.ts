@@ -27,7 +27,7 @@ export function createContinuation(deps: GoalDeps, port: ContinuationPort): Cont
       await port.deliver({
         sessionID,
         text: continuationTrigger(),
-        description: noticeLine("Goal auto-continue", goal.objective),
+        description: noticeLine(deps.messages["label.autoContinue"], goal.objective),
       })
       const now = deps.now()
       await deps.repo.save(sessionID, { ...goal, lastContinuationAt: now, updatedAt: now })

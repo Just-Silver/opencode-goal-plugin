@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
+import { messagesFor } from "../i18n"
 import { complete, createGoal, pause } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
 import { createContinuation, type Continuation } from "./continuation"
@@ -30,6 +31,7 @@ function makeDeps(): GoalDeps {
   return {
     repo: createRepository(memoryStorage()),
     options: { ...DEFAULT_OPTIONS, blockedThreshold: 3, emptyThreshold: 3 },
+    messages: messagesFor("en"),
     now: () => 1000,
     newGoalId: () => "g1",
     isRestricted: () => false,

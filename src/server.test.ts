@@ -39,7 +39,7 @@ function mockCtx(get: () => Promise<unknown>) {
     },
   }
   const ctx = {
-    options: {},
+    options: { language: "en" },
     location: { directory: "test-location" },
     storage,
     command: {

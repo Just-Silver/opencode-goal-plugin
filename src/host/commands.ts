@@ -2,6 +2,7 @@ import { pause as pauseGoal, resume as resumeGoal } from "../model/goal"
 import type { Goal } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
+import { format, statusLabel, type Messages } from "../i18n/messages"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
 
@@ -52,36 +53,45 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     const existing = await deps.repo.load(sessionID)
     await port.notify(
       sessionID,
-      existing ? statusLine(withPending(existing, deps.pendingUsage?.(sessionID))) : "No goal is set for this session.",
+      existing
+        ? statusLine(withPending(existing, deps.pendingUsage?.(sessionID)), deps.messages)
+        : deps.messages["notice.noGoal"],
     )
   }
 
   const pause = async (sessionID: string): Promise<void> => {
     const existing = await deps.repo.load(sessionID)
-    if (!existing) return port.notify(sessionID, "No goal is set for this session.")
-    if (existing.status !== "active") return port.notify(sessionID, `Goal is ${existing.status}; nothing to pause.`)
+    if (!existing) return port.notify(sessionID, deps.messages["notice.noGoal"])
+    if (existing.status !== "active")
+      return port.notify(
+        sessionID,
+        format(deps.messages["notice.nothingToPause"], { status: statusLabel(deps.messages, existing.status) }),
+      )
     await deps.repo.save(sessionID, pauseGoal(existing, deps.now()))
-    return port.notify(sessionID, "Goal paused.")
+    return port.notify(sessionID, deps.messages["notice.paused"])
   }
 
   const resume = async (sessionID: string): Promise<void> => {
     const existing = await deps.repo.load(sessionID)
-    if (!existing) return port.notify(sessionID, "No goal is set for this session.")
+    if (!existing) return port.notify(sessionID, deps.messages["notice.noGoal"])
     let resumed: Goal
     try {
       resumed = resumeGoal(existing, deps.now())
     } catch {
-      return port.notify(sessionID, `Goal is ${existing.status}; nothing to resume.`)
+      return port.notify(
+        sessionID,
+        format(deps.messages["notice.nothingToResume"], { status: statusLabel(deps.messages, existing.status) }),
+      )
     }
     await deps.repo.save(sessionID, resumed)
-    return port.notify(sessionID, "Goal resumed.")
+    return port.notify(sessionID, deps.messages["notice.resumed"])
   }
 
   const clear = async (sessionID: string): Promise<void> => {
     const existing = await deps.repo.load(sessionID)
-    if (!existing) return port.notify(sessionID, "No goal is set for this session.")
+    if (!existing) return port.notify(sessionID, deps.messages["notice.noGoal"])
     await deps.repo.remove(sessionID)
-    return port.notify(sessionID, "Goal cleared.")
+    return port.notify(sessionID, deps.messages["notice.cleared"])
   }
 
   return {
@@ -91,7 +101,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
       await port.deliver({
         sessionID: input.sessionID,
         text: goalCommandPrompt(parsed.objective ?? ""),
-        description: noticeLine("Goal request", parsed.objective ?? ""),
+        description: noticeLine(deps.messages["label.goalRequest"], parsed.objective ?? ""),
       })
     },
     status,
@@ -101,11 +111,26 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
   }
 }
 
-function statusLine(goal: Goal): string {
-  const budget = goal.tokenBudget === undefined ? "no budget" : `budget ${goal.tokenBudget}`
+function statusLine(goal: Goal, messages: Messages): string {
+  const budget =
+    goal.tokenBudget === undefined
+      ? messages["status.noBudget"]
+      : format(messages["status.budget"], { budget: goal.tokenBudget })
   // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）。
   const usage = goal.usage && usageIsComplete(goal) ? goal.usage : undefined
-  const detail = usage ? ` (cacheRead ${usage.cacheRead} · new work ${newWorkOf(usage)})` : ""
-  const lastError = goal.lastError ? `; last error: ${goal.lastError.message || goal.lastError.type}` : ""
-  return `Goal (${goal.status}) — tokens ${goal.tokensUsed} / ${budget}${detail}; ${goal.timeUsedSeconds}s${lastError}. Objective: ${goal.objective}`
+  const detail = usage
+    ? format(messages["status.detail"], { cacheRead: usage.cacheRead, newWork: newWorkOf(usage) })
+    : ""
+  const lastError = goal.lastError
+    ? format(messages["status.lastError"], { error: goal.lastError.message || goal.lastError.type })
+    : ""
+  return format(messages["status.line"], {
+    status: statusLabel(messages, goal.status),
+    tokens: goal.tokensUsed,
+    budget,
+    detail,
+    seconds: goal.timeUsedSeconds,
+    lastError,
+    objective: goal.objective,
+  })
 }

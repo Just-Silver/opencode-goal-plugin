@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
+import { messagesFor } from "../i18n"
 import { createGoal, pause } from "../model/goal"
 import { createRepository, type Repository, type StorageLike } from "../store/repository"
 import { createCommandHandlers, parseGoalCommand } from "./commands"
@@ -59,6 +60,7 @@ function makeDeps(): GoalDeps {
   return {
     repo: createRepository(memoryStorage()),
     options: { ...DEFAULT_OPTIONS },
+    messages: messagesFor("en"),
     now: () => 1000,
     newGoalId: () => "g1",
     isRestricted: () => false,
@@ -179,5 +181,19 @@ describe("createCommandHandlers", () => {
     const { handlers, notices } = runner({ ...makeDeps(), repo })
     await expect(handlers.resume("ses_1")).rejects.toThrow("storage down")
     expect(notices).toHaveLength(0)
+  })
+
+  test("notices follow the injected language", async () => {
+    const deps = { ...makeDeps(), messages: messagesFor("zh-CN") }
+    const { handlers, notices } = runner(deps)
+    await handlers.status("ses_1")
+    expect(notices[0]).toBe("本会话未设置目标。")
+  })
+
+  test("a rendered status line leaves no placeholders", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }))
+    await handlers.status("ses_1")
+    expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
   })
 })

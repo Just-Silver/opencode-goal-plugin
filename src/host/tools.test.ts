@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
+import { messagesFor } from "../i18n"
 import { createGoal } from "../model/goal"
 import { createRepository, type StorageLike } from "../store/repository"
 import { createGoalTool } from "./tools"
@@ -28,6 +29,7 @@ function makeDeps(overrides: Partial<GoalDeps> = {}): GoalDeps {
   return {
     repo: createRepository(memoryStorage()),
     options: { ...DEFAULT_OPTIONS },
+    messages: messagesFor("en"),
     now: () => 1000,
     newGoalId: () => `g${++id}`,
     isRestricted: () => false,
