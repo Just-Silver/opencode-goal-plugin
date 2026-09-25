@@ -23,3 +23,25 @@
 2. **reconcile 兜底（冷启动）**：留一条宿主侧已不存在的会话记录，重载 / 重启一次（记录 `updatedAt` 超过 `reconcile_guard_minutes`）后必须消失。
 
 读宿主 KV 的注意点：**必须把 `opencode.db` 的 `-wal`（和 `-shm`）一起复制**再读，否则只读连接看不到新写入，会误判成「0 条记录」。
+
+## 3. 启动兜底 reconcile（改动 reconcile 后必跑）
+
+`scripts/smoke-api.mjs --scenario reconcile` 已自动化：
+
+1. 先建一个**活记录**（本会话），确保不被误删；
+2. 直接往宿主 KV 写一条「会话不存在」的**过期孤儿**（`updatedAt` 早于 `reconcile_guard_minutes`）；
+3. `opencode reload` 触发插件 setup → reconcile；
+4. 断言：孤儿消失、活记录保留。
+
+> 为什么能直接写 KV：宿主 `ctx.storage` 就是 `kv` 表、**无内存缓存**（`packages/core/src/kv.ts`），reload 后新实例 `scan` 即见。
+
+## 4. 空转 → blocked（依赖模型，真机不一定可复现）
+
+- 判定（`src/model/empty.ts`）：只有**自动续跑轮**（`automatic=true`）且**零活动**（无非空文本、无推理、无工具调用）才计入 `emptyStreak`；连续 `empty_threshold`（默认 3）轮 → `blocked`。
+- **推理模型必然每轮产出推理/文本 → 真机上永不空转**，`--scenario empty` 会 FAIL（这是模型不配合，不是插件问题）。
+- 因此这条以自动化测试为准：`src/model/empty.test.ts` + `src/host/events.test.ts` 的「three consecutive empty automatic turns block the goal」（走真实 router）。
+- 若确实要真机验证，需换一个**能返回空输出**的模型/variant。
+
+## 5. 自动化场景一览（`scripts/smoke-api.mjs`）
+
+`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty`。

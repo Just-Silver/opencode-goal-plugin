@@ -84,8 +84,34 @@ async function api(opId, { params = {}, query = {}, body } = {}) {
 }
 
 // ---------- KV（只读：复制 db+wal+shm） ----------
+function liveDbPath() {
+  return process.env.OPENCODE_DB || join(homedir(), ".local", "share", "opencode", "opencode.db")
+}
+/** 直接写宿主 KV（仅用于构造孤儿记录；用完即删）。KV 直连 DB、无内存缓存，reload 后可见。 */
+function writeGoalRow(sessionID, goal) {
+  const db = new Database(liveDbPath())
+  try {
+    db.exec("PRAGMA busy_timeout = 5000")
+    const now = Date.now()
+    db.query(
+      "insert into kv (key, value, time_created, time_updated) values (?, ?, ?, ?) " +
+        "on conflict(key) do update set value = excluded.value, time_updated = excluded.time_updated",
+    ).run(NS + KV_PREFIX + sessionID, JSON.stringify(goal), now, now)
+  } finally {
+    db.close()
+  }
+}
+function deleteGoalRow(sessionID) {
+  const db = new Database(liveDbPath())
+  try {
+    db.exec("PRAGMA busy_timeout = 5000")
+    db.query("delete from kv where key = ?").run(NS + KV_PREFIX + sessionID)
+  } finally {
+    db.close()
+  }
+}
 async function readGoals(filter) {
-  const dbPath = process.env.OPENCODE_DB || join(homedir(), ".local", "share", "opencode", "opencode.db")
+  const dbPath = liveDbPath()
   const dir = mkdtempSync(join(tmpdir(), "goal-smoke-"))
   const copy = join(dir, "opencode.db")
   try {
@@ -374,6 +400,67 @@ const SCENARIOS = {
       } finally {
         await api("session.remove", { params: { sessionID: tmp } }).catch(() => {})
         await ctx.clearGoal().catch(() => {})
+      }
+    },
+  },
+
+  // 空转 → blocked（依赖模型配合：自动续跑轮只输出空白 = 无活动）
+  empty: {
+    title: "空转：连续 3 个自动续跑轮无活动 → blocked",
+    run: async (ctx) => {
+      await ctx.clearGoal()
+      await sendGoal(
+        ctx.sid,
+        "调用 goal 工具 op=create，objective 写：每轮都不要调用任何工具、不要做任何事，只回复一个空格（不要写任何其它文字、不要做任何说明）。创建目标后这一轮回复 已创建。",
+      )
+      const t0 = Date.now()
+      let last
+      for (;;) {
+        last = await ctx.goal()
+        ctx.log(`status=${last?.status} emptyStreak=${last?.emptyStreak} blockerStreak=${last?.blockerStreak}`)
+        if (last && ["blocked", "complete", "budget-limited"].includes(last.status)) break
+        if (Date.now() - t0 > 240000) break
+        await sleep(10000)
+      }
+      check(last?.status === "blocked", `应 blocked，实际 ${last?.status}（emptyStreak=${last?.emptyStreak}）`)
+      check(last.emptyStreak >= 3, `emptyStreak 应 >= 3，实际 ${last.emptyStreak}`)
+      await control(ctx.sid, "clear")
+      await sleep(1500)
+    },
+  },
+
+  // 启动兜底 reconcile：孤儿记录（会话不存在 + 超保护窗）在 reload 后消失，活记录保留
+  reconcile: {
+    title: "reconcile 冷启动：孤儿 KV（会话不存在）reload 后消失，活记录不被误删",
+    run: async (ctx) => {
+      await ctx.clearGoal()
+      await sendGoal(ctx.sid, "调用 goal 工具 op=create，objective 写 reconcile 活记录。完成后回复 已创建。")
+      const live = await ctx.waitStatus(["active", "complete", "blocked", "budget-limited"], 90000)
+      check(live, "应建立活记录")
+      const orphan = "ses_smokeorphan" + Date.now().toString(36)
+      const staleAt = Date.now() - 10 * 60_000 // 超出默认 guard（reconcile_guard_minutes=5）
+      try {
+        writeGoalRow(orphan, {
+          version: 1,
+          goalId: "g-orphan",
+          objective: "孤儿记录（会话不存在）",
+          status: "active",
+          tokensUsed: 0,
+          timeUsedSeconds: 0,
+          blockerStreak: 0,
+          emptyStreak: 0,
+          createdAt: staleAt,
+          updatedAt: staleAt,
+        })
+        check(await ctx.goal(orphan), "孤儿记录应已写入宿主 KV")
+        reload()
+        await sleep(7000)
+        check(!(await ctx.goal(orphan)), "reconcile 应清掉孤儿记录")
+        check(await ctx.goal(ctx.sid), "reconcile 不得误删活记录")
+      } finally {
+        deleteGoalRow(orphan)
+        await control(ctx.sid, "clear").catch(() => {})
+        await sleep(1500)
       }
     },
   },
