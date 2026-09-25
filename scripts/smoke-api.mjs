@@ -217,6 +217,12 @@ async function waitFor(label, fn, { timeout = 180000, interval = 3000 } = {}) {
 class Fail extends Error {}
 const check = (cond, msg) => { if (!cond) throw new Fail(msg) }
 
+// 回执是面向用户文案，随 `language` 配置 / 系统 locale 变化（en / zh-CN）。
+// 断言一律用**中英双语**匹配，脚本才能在任意语言下通过（否则中文机器上必然误报）。
+const RE_NO_GOAL = /(No goal|未设置目标)/i
+const RE_AUTO_CONTINUE = /(Goal auto-continue|目标自动续跑)/i
+const RE_STATUS_LINE = /^(Goal \(|目标（)/
+
 // ---------- 场景 ----------
 const SCENARIOS = {
   // 零 token：命令面
@@ -230,7 +236,7 @@ const SCENARIOS = {
       await sleep(2500)
       const receipts = ctx.receipts(m)
       check(receipts.length >= 4, `应有 4 条回执，实际 ${receipts.length}`)
-      check(receipts.every((d) => /No goal/i.test(d)), `回执应都是 No goal：${JSON.stringify(receipts)}`)
+      check(receipts.every((d) => RE_NO_GOAL.test(d)), `回执应都是 No goal：${JSON.stringify(receipts)}`)
       check(!(await ctx.goal()), "不应留下 KV 记录")
     },
   },
@@ -249,7 +255,7 @@ const SCENARIOS = {
       const m2 = ctx.events.mark()
       await control(ctx.sid, "status")
       await sleep(1500)
-      check(ctx.receipts(m2).some((d) => /^Goal \(/.test(d)), "status 回执应报告目标状态")
+      check(ctx.receipts(m2).some((d) => RE_STATUS_LINE.test(d)), "status 回执应报告目标状态")
       await control(ctx.sid, "clear")
       await sleep(2000)
       check(!(await ctx.goal()), "clear 后 KV 记录应消失")
@@ -320,7 +326,7 @@ const SCENARIOS = {
       const done = await ctx.waitStatus(["complete", "blocked", "budget-limited"], 300000)
       check(done, "应到达终态（complete/blocked/budget-limited）")
       const succeeded = ctx.evCount("session.execution.succeeded", m)
-      const cont = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      const cont = ctx.receipts(m).filter((d) => RE_AUTO_CONTINUE.test(d)).length
       ctx.log(`execution.succeeded=${succeeded}  auto-continue 回执=${cont}`)
       check(succeeded >= 2, `应至少 2 轮，实际 ${succeeded}（模型可能单轮做完）`)
       check(cont >= 1, `应至少 1 条 auto-continue 回执，实际 ${cont}`)
@@ -345,14 +351,14 @@ const SCENARIOS = {
       check(active, "目标应进入 active")
       // 后台任务在跑的窗口内：不得出现 auto-continue 回执
       await sleep(15000)
-      const during = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      const during = ctx.receipts(m).filter((d) => RE_AUTO_CONTINUE.test(d)).length
       ctx.log(`后台运行期间 auto-continue 回执=${during}`)
       check(during === 0, `后台任务运行期间不应自动续跑，实际 ${during}`)
       // 完成后宿主唤醒 → 恢复。注意：模型可能在唤醒轮里直接收尾成 complete，
       // 此时不会再有 auto-continue（属正常，不是缺陷）——故只记录，不硬断言。
       const done = await ctx.waitStatus(["complete", "blocked", "budget-limited"], 240000)
       check(done, "应到达终态")
-      const after = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      const after = ctx.receipts(m).filter((d) => RE_AUTO_CONTINUE.test(d)).length
       ctx.log(`完成后 auto-continue 回执=${after}（唤醒轮直接收尾时为 0，属正常）`)
       await control(ctx.sid, "clear")
       await sleep(1500)
@@ -372,12 +378,12 @@ const SCENARIOS = {
       const active = await ctx.waitStatus("active", 90000)
       check(active, "目标应进入 active")
       await sleep(15000)
-      const during = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      const during = ctx.receipts(m).filter((d) => RE_AUTO_CONTINUE.test(d)).length
       ctx.log(`子代理运行期间 auto-continue 回执=${during}`)
       check(during === 0, `后台子代理运行期间不应自动续跑，实际 ${during}`)
       const done = await ctx.waitStatus(["complete", "blocked", "budget-limited"], 240000)
       check(done, "应到达终态")
-      const after = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      const after = ctx.receipts(m).filter((d) => RE_AUTO_CONTINUE.test(d)).length
       ctx.log(`完成后 auto-continue 回执=${after}（唤醒轮直接收尾时为 0，属正常）`)
       await control(ctx.sid, "clear")
       await sleep(1500)

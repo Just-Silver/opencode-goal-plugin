@@ -122,4 +122,4 @@
 - **清理**：`/goal-clear` → 「目标已清除。」 ✓
 - **回归**：`smoke-api.mjs --session <sid> --scenario budget` **PASS**（9.3s）✓
 - **汇总：探针 18/18 PASS。**
-- **已知陈旧（非本次回归）**：`smoke-api.mjs` 的 `commands` / `continuation` / `background*` 场景用**英文正则**匹配回执（`/No goal/i`、`/Goal auto-continue/i`），i18n 交付后在 `zh-CN` 机器上已失效（本次只跑了语言无关的 `budget` 场景）。建议后续把这类正则改成中英双语，或按 `language: "en"` 固定语言跑冒烟。
+- **顺带修掉的语言依赖（非本次功能回归）**：`smoke-api.mjs` 原用**英文正则**匹配回执（`/No goal/i`、`/^Goal \(/`、`/Goal auto-continue/i`），i18n 交付后在 `zh-CN` 机器上必然误报；已改为脚本顶部的双语常量 `RE_NO_GOAL` / `RE_STATUS_LINE` / `RE_AUTO_CONTINUE`（约定见 `CONTRIBUTING.md`）。修复后复跑 `commands,basic,continuation` **3/3 PASS**（其中 `continuation` 实测 `auto-continue 回执=2`，修前为 0 → 旧脚本会把正常行为判为 FAIL）。
