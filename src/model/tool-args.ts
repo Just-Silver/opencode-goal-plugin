@@ -1,6 +1,6 @@
-export type ToolOp = "create" | "get" | "complete" | "resume" | "drop" | "block"
+export type ToolOp = "create" | "get" | "complete" | "resume" | "drop" | "block" | "budget"
 
-const OPS: readonly ToolOp[] = ["create", "get", "complete", "resume", "drop", "block"]
+const OPS: readonly ToolOp[] = ["create", "get", "complete", "resume", "drop", "block", "budget"]
 
 export interface ToolArgs {
   readonly op: ToolOp

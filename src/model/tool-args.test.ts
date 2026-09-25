@@ -23,6 +23,13 @@ describe("parseToolArgs", () => {
       })
   })
 
+  test("accepts the budget op", () => {
+    expect(parseToolArgs({ op: "budget", token_budget: 500 })).toEqual({
+      ok: true,
+      args: { op: "budget", tokenBudget: 500 },
+    })
+  })
+
   test("accepts a block call", () => {
     expect(parseToolArgs({ op: "block", blocker_key: "no-key", blocker: "missing credentials" })).toEqual({
       ok: true,

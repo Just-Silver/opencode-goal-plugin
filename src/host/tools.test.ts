@@ -221,3 +221,61 @@ describe("createGoalTool", () => {
     expect(zh.input.properties.objective.description).toContain("目标正文")
   })
 })
+
+describe("budget op", () => {
+  test("sets a budget on an existing goal", async () => {
+    const deps = makeDeps()
+    const tool = createGoalTool(deps)
+    await tool.execute({ op: "create", objective: "x" }, ctx)
+    const result = parse(await tool.execute({ op: "budget", token_budget: 500 }, ctx))
+    expect(result.goal.tokenBudget).toBe(500)
+    expect((await deps.repo.load("ses_1"))?.tokenBudget).toBe(500)
+  })
+
+  test("token_budget 0 clears the budget", async () => {
+    const deps = makeDeps()
+    const tool = createGoalTool(deps)
+    await tool.execute({ op: "create", objective: "x", token_budget: 100 }, ctx)
+    const result = parse(await tool.execute({ op: "budget", token_budget: 0 }, ctx))
+    expect(result.goal.tokenBudget).toBeNull()
+    const stored = await deps.repo.load("ses_1")
+    expect(stored && "tokenBudget" in stored).toBe(false)
+  })
+
+  test("requires token_budget explicitly", async () => {
+    const deps = makeDeps()
+    const tool = createGoalTool(deps)
+    await tool.execute({ op: "create", objective: "x" }, ctx)
+    await expect(tool.execute({ op: "budget" }, ctx)).rejects.toThrow(/token_budget/)
+  })
+
+  test("errors without a goal and for a restricted agent", async () => {
+    const tool = createGoalTool(makeDeps())
+    await expect(tool.execute({ op: "budget", token_budget: 10 }, ctx)).rejects.toThrow(/no goal/)
+
+    const restricted = createGoalTool(makeDeps({ isRestricted: (agent) => agent === "plan" }))
+    await restricted.execute({ op: "create", objective: "x" }, ctx)
+    await expect(
+      restricted.execute({ op: "budget", token_budget: 10 }, { sessionID: "ses_1", agent: "plan" }),
+    ).rejects.toThrow(/budget/)
+  })
+
+  test("rejects a budget above maxGoalTokenBudget", async () => {
+    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, maxGoalTokenBudget: 100 } })
+    const tool = createGoalTool(deps)
+    await tool.execute({ op: "create", objective: "x" }, ctx)
+    await expect(tool.execute({ op: "budget", token_budget: 101 }, ctx)).rejects.toThrow(/max_goal_token_budget/)
+  })
+
+  test("lowering below the used tokens returns the budget-limit instruction", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 100 }),
+      tokensUsed: 100,
+    })
+    const tool = createGoalTool(deps)
+    const result = parse(await tool.execute({ op: "budget", token_budget: 50 }, ctx))
+    expect(result.goal.status).toBe("budget-limited")
+    expect(result.instruction).toContain("token budget")
+  })
+})

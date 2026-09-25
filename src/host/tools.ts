@@ -1,7 +1,7 @@
 import type { Messages } from "../i18n/messages"
 import { applyBlocker } from "../model/blocked"
-import { complete, createGoal, resume } from "../model/goal"
-import { applyBudget } from "../model/limits"
+import { GoalError, complete, createGoal, resume } from "../model/goal"
+import { applyBudget, setBudget } from "../model/limits"
 import { normalizeObjective } from "../model/objective"
 import { parseToolArgs } from "../model/tool-args"
 import { buildToolResult } from "../model/tool-result"
@@ -19,11 +19,11 @@ export function goalToolInput(messages: Messages): any {
     properties: {
       op: {
         type: "string",
-        enum: ["create", "get", "complete", "resume", "drop", "block"],
+        enum: ["create", "get", "complete", "resume", "drop", "block", "budget"],
         description: messages["tool.goal.op"],
       },
       objective: { type: "string", description: messages["tool.goal.objective"] },
-      token_budget: { type: "integer", minimum: 1, description: messages["tool.goal.tokenBudget"] },
+      token_budget: { type: "integer", minimum: 0, description: messages["tool.goal.tokenBudget"] },
       blocker_key: { type: "string", description: messages["tool.goal.blockerKey"] },
       blocker: { type: "string", description: messages["tool.goal.blocker"] },
     },
@@ -106,6 +106,32 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           if (!existing) throw new Error("goal: no goal to drop")
           await deps.repo.remove(sessionID)
           return asContent({ goal: null, dropped: true })
+        }
+
+        case "budget": {
+          if (deps.isRestricted(context.agent)) throw new Error("goal: this agent cannot change the budget")
+          if (!existing) throw new Error("goal: no goal to change the budget of")
+          if (args.tokenBudget === undefined)
+            throw new Error("goal: token_budget is required for op budget (0 = no budget)")
+          let goal: Goal
+          try {
+            goal = setBudget(existing, {
+              budget: args.tokenBudget === 0 ? undefined : args.tokenBudget,
+              maxTokenBudget: deps.options.maxGoalTokenBudget,
+              now,
+            })
+          } catch (error) {
+            if (error instanceof GoalError) throw new Error(`goal: ${error.message}`)
+            throw error
+          }
+          await deps.repo.save(sessionID, goal)
+          const result = view(goal)
+          if (goal.status === "budget-limited")
+            return asContent({
+              ...result,
+              instruction: budgetLimitPrompt(goal, { maxObjectiveChars: deps.options.maxObjectiveChars }),
+            })
+          return asContent(result)
         }
 
         case "block": {
