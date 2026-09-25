@@ -18,6 +18,7 @@ describe("goalContext", () => {
     expect(text).toContain("Token budget: 500")
     expect(text).toContain("Completion audit")
     expect(text).toContain('op "complete"')
+    expect(text).toContain('"budget"')
   })
 
   test("truncates a long objective and points at the get op", () => {
@@ -45,6 +46,7 @@ describe("continuationTrigger", () => {
 describe("other templates", () => {
   test("budgetLimitPrompt is a wrap-up instruction", () => {
     expect(budgetLimitPrompt(goal, { maxObjectiveChars: 4000 })).toContain("budget")
+    expect(budgetLimitPrompt(goal, { maxObjectiveChars: 4000 })).toContain('op "budget"')
   })
 
   test("blockedWrapUp names the blocker", () => {

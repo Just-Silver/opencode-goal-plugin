@@ -35,7 +35,7 @@ Status: ${goal.status}
 Budget:
 ${budgetLines(goal)}
 
-This goal persists across turns: ending a turn does not end it, and it does not require shrinking the objective to what fits now. While the status is "active", keep making concrete progress toward the real requested end state. Every state change goes through the goal tool ("create" / "complete" / "block" / "resume" / "drop").
+This goal persists across turns: ending a turn does not end it, and it does not require shrinking the objective to what fits now. While the status is "active", keep making concrete progress toward the real requested end state. Every state change goes through the goal tool ("create" / "complete" / "block" / "resume" / "drop" / "budget").
 
 Work from evidence:
 Use the current worktree and external state as authoritative. Previous conversation context can help locate relevant work, but inspect the current state before relying on it. Improve, replace, or remove existing work as needed to satisfy the actual objective.
@@ -107,7 +107,9 @@ Budget:
 
 The system has marked the goal as budget-limited, so do not start new substantive work for this goal. Wrap up this turn soon: summarize useful progress, identify remaining work or blockers, and leave the user with a clear next step.
 
-Do not call goal with op "complete" unless the goal is actually complete. The budget-limited status takes precedence over pausing.`
+Do not call goal with op "complete" unless the goal is actually complete. The budget-limited status takes precedence over pausing.
+
+Do not call goal with op "budget" unless the user explicitly asked for a new budget.`
 }
 
 /** `/goal <text>` 转发给模型的模板：自适应访谈/结构化。 */
@@ -125,7 +127,7 @@ Decide whether this is actionable:
 - If it is specific enough (a clear success criterion, a way to verify it, and a bounded scope), normalize it into a concrete objective and call goal with op "create".
 - If it is not specific enough, ask focused clarifying questions first (one at a time, at most six), then call goal with op "create" once you have enough.
 
-Call goal with op "create" only when the user explicitly asked for a goal. Do not set a token_budget unless the user explicitly gave one.`
+Call goal with op "create" only when the user explicitly asked for a goal. Do not set or change a token budget unless the user explicitly gave one.`
 }
 
 export function blockedWrapUp(goal: Goal): string {
