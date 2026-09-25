@@ -56,6 +56,19 @@ describe("createContinuation", () => {
     expect(sent[0]?.description).toContain("finish X")
     expect(sent[0]?.description.length).toBeLessThan(120)
     expect((await deps.repo.load("ses_1"))?.lastContinuationAt).toBe(5000)
+    expect((await deps.repo.load("ses_1"))?.continuations).toBe(1)
+    expect(sent[0]?.description).toContain("#1")
+  })
+
+  test("counts every continuation cumulatively across turns", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const sent: string[] = []
+    const continuation = createContinuation(deps, { deliver: async (input) => void sent.push(input.description) })
+    await continuation.onIdle("ses_1", "build")
+    await continuation.onIdle("ses_1", "build")
+    expect((await deps.repo.load("ses_1"))?.continuations).toBe(2)
+    expect(sent[1]).toContain("#2")
   })
 
   test("does nothing without an active goal", async () => {

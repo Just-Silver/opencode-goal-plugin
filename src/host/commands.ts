@@ -121,6 +121,7 @@ function statusLine(goal: Goal, messages: Messages): string {
   const detail = usage
     ? format(messages["status.detail"], { cacheRead: usage.cacheRead, newWork: newWorkOf(usage) })
     : ""
+  const continuations = format(messages["status.continuations"], { count: goal.continuations ?? 0 })
   const lastError = goal.lastError
     ? format(messages["status.lastError"], { error: goal.lastError.message || goal.lastError.type })
     : ""
@@ -131,6 +132,7 @@ function statusLine(goal: Goal, messages: Messages): string {
     detail,
     seconds: goal.timeUsedSeconds,
     lastError,
+    continuations,
     objective: goal.objective,
   })
 }

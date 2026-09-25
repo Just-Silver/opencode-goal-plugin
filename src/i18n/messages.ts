@@ -8,12 +8,18 @@ export interface Messages {
   readonly "cmd.resume": string
   readonly "cmd.clear": string
   readonly "cmd.debug": string
+  readonly "cmd.budget": string
   readonly "notice.noGoal": string
   readonly "notice.paused": string
   readonly "notice.resumed": string
   readonly "notice.cleared": string
   readonly "notice.nothingToPause": string
   readonly "notice.nothingToResume": string
+  readonly "notice.budgetSet": string
+  readonly "notice.budgetCleared": string
+  readonly "notice.budgetUsage": string
+  readonly "notice.budgetInvalid": string
+  readonly "notice.budgetExceedsMax": string
   readonly "label.goalRequest": string
   readonly "label.autoContinue": string
   readonly "status.active": string
@@ -25,6 +31,7 @@ export interface Messages {
   readonly "status.line": string
   readonly "status.budget": string
   readonly "status.noBudget": string
+  readonly "status.continuations": string
   readonly "status.detail": string
   readonly "status.lastError": string
   readonly "signal.usage-limited": string

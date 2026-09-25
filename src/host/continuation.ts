@@ -1,3 +1,5 @@
+import { format } from "../i18n/messages"
+import { recordContinuation } from "../model/goal"
 import { continuationTrigger } from "../prompts/index"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
@@ -24,13 +26,13 @@ export function createContinuation(deps: GoalDeps, port: ContinuationPort): Cont
       const goal = await deps.repo.load(sessionID)
       if (!goal || goal.status !== "active") return false
       if (deps.isRestricted(agentId)) return false
+      const count = (goal.continuations ?? 0) + 1
       await port.deliver({
         sessionID,
         text: continuationTrigger(),
-        description: noticeLine(deps.messages["label.autoContinue"], goal.objective),
+        description: noticeLine(format(deps.messages["label.autoContinue"], { count }), goal.objective),
       })
-      const now = deps.now()
-      await deps.repo.save(sessionID, { ...goal, lastContinuationAt: now, updatedAt: now })
+      await deps.repo.save(sessionID, recordContinuation(goal, deps.now()))
       return true
     },
   }

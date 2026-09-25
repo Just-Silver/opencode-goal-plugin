@@ -98,6 +98,7 @@ describe("createCommandHandlers", () => {
     await handlers.goal({ sessionID: "ses_1", prompt: { text: "" } })
     expect(prompts).toHaveLength(0)
     expect(notices[0]).toContain("Goal (active)")
+    expect(notices[0]).toContain("auto-continues 0")
   })
 
   test("status with no goal reports that none is set", async () => {
