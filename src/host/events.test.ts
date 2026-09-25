@@ -963,6 +963,23 @@ describe("createEventRouter", () => {
     }
   })
 
+  test("a quota signal upgrades a blocked goal to usage-limited", async () => {
+    const deps = makeDeps()
+    const base = createGoal({ goalId: "g1", objective: "o", now: 0 })
+    await deps.repo.save("ses_1", { ...base, status: "blocked", blockerKey: "k", blockerStreak: 3 })
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "quota" }))
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("usage-limited")
+    // 模型报障字段不被信号污染
+    expect(goal?.blockerKey).toBe("k")
+    expect(goal?.blockerStreak).toBe(3)
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain("usage-limited")
+  })
+
   test("a host signal on an already usage-limited goal is a no-op with no notice", async () => {
     const deps = makeDeps()
     const base = createGoal({ goalId: "g1", objective: "o", now: 0 })
