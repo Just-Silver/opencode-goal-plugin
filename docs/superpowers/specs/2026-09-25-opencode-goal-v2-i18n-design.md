@@ -1,14 +1,14 @@
 # opencode-goal V2 子项目设计：国际化（i18n）
 
 - 日期：2026-09-25
-- 状态：**待审阅**
+- 状态：**已定稿（独立子代理审阅后修订，2026-09-25）**
 - 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.16`；宿主源码检出 `../Externals/opencode`）
 - 上级：V2 里程碑。**说明**：早先文档把 i18n 列为「已砍」，本设计将其**恢复为独立子项目并优先实现**（用户决定）。
 - 相关：`docs/superpowers/specs/2026-09-24-opencode-goal-design.md`（v1，§1 非目标提到 i18n）、`docs/01-design-orientation.md` §4/§7、`docs/opencode/config-install.md`、`docs/opencode/known-issues.md`
 
 ## 1. 背景与问题
 
-插件的**面向用户文案**（命令描述、`/goal-*` 回执、宿主信号回执、`/goal-debug` 输出）目前**全部是英文硬编码**。中文用户（本插件的主要使用者）在 TUI 里读到的回执如 `Goal marked blocked: Invalid or missing API key. Use /goal-resume after resolving it.`，需要自行翻译才能理解插件做了什么。
+插件的**面向用户文案**（命令描述、`/goal-*` 回执、宿主信号回执、`/goal-debug` 输出）目前**绝大多数是英文硬编码**（`/goal-debug` 的用法行已是中英混排，属历史遗留）。中文用户（本插件的主要使用者）在 TUI 里读到的回执如 `Goal marked blocked: Invalid or missing API key. Use /goal-resume after resolving it.`，需要自行翻译才能理解插件做了什么。
 
 v1 设计把 i18n 列为非目标（「英文模板 + 模型跟随用户语言」），但那只覆盖**发给模型的提示词**；**给人看的回执**并没有任何语言策略。本子项目补上这一层。
 
@@ -36,6 +36,8 @@ v1 设计把 i18n 列为非目标（「英文模板 + 模型跟随用户语言�
 - **不本地化工具错误信息**（`tools.ts` 里 `goal: ...` 的 `throw`）与**工具输出**里的 `completionBudgetReport`（都是模型读的）。
 - 不做运行时语言切换（语言在 `setup` 时确定一次）、不做 per-session 语言、不做 >2 种语言、不做 JSON/YAML 资源文件、不引入任何运行时依赖。
 - 不改命令名/工具名/状态标识符（`active` / `usage-limited` 等仍是内部 token）。
+- **不本地化配置校验错误**（`opencode-goal: option "…" must be …`）与**日志**（`console.error`）——面向运维/日志，保持英文。
+- **区分**：不本地化的是 `prompts/index.ts` 的**提示词**；而 `goal` 工具 **schema** 的描述/参数说明**要**本地化（§5.6，取舍见 §8）。
 
 ## 3. 设计
 
@@ -80,6 +82,9 @@ export type MessageKey = keyof Messages
 export function format(template: string, params: Record<string, string | number>): string
 ```
 
+- 实现用**函数式 replacer**（`(_, name) => params[name] ?? \`{${name}}\``），避免用户文本里的 `$&` / `$1` 被 `String.replace` 特殊解释。
+- 未提供的占位符运行时**原样保留**（不抛）——但由 §6 的占位符对齐测试在编译期之外兜底。
+
 - 值为**带占位符的字符串**（如 `"目标当前为「{status}」，无需暂停。"`），不用函数值——与 gettext/ICU 同形，翻译者只碰一个文件。
 - `en.ts` / `zh-CN.ts` 均 `satisfies Messages`：**少键/多键都会 `tsc` 报错**。
 - `index.ts`：`MESSAGES: Record<Language, Messages>`、`messagesFor(language)`。
@@ -87,17 +92,18 @@ export function format(template: string, params: Record<string, string | number>
 ### 3.4 配置项（`src/config.ts`）
 
 - `Options` 新增 `readonly language?: Language`（`undefined` = 跟随系统）。
-- 配置键 `language`：接受 `zh` / `zh-CN` / `en`（大小写不敏感、`_` 归一）；非字符串或无法识别 → 抛 `opencode-goal: option "language" must be "zh-CN" or "en"`。
+- 配置键 `language`：非字符串 → 抛错；字符串经 `toLanguage` 归一，能映射到 `zh`/`en` 即接受（故 `zh` / `zh-CN` / `zh_CN` / `en-US` 等均可），否则抛 `opencode-goal: option "language" must be "zh-CN" or "en"`。
+- `DEFAULT_OPTIONS` **不含** `language`（缺省即跟随系统；避免 `language: undefined` 显式出现）。
 
 ### 3.5 接线
 
 - `GoalDeps` 新增必填 `readonly messages: Messages`。
 - `server.ts`：`const language = resolveLanguage(options.language, systemLocale()); const messages = messagesFor(language)`；命令描述与 `goal_debug` 工具描述改用 `messages`。
-- `commands.ts`：`notice.*` / `status.*` / `label.goalRequest` 全部走 `deps.messages`；`statusLine` 用 `statusLabel(messages, status)` 取本地化状态词。
+- `commands.ts`：`notice.*` / `status.*` / `label.goalRequest` 全部走 `deps.messages`；`statusLine` 与 `notice.nothingToPause` / `notice.nothingToResume` 里的 `{status}` 都用 `statusLabel(messages, status)` 取本地化状态词（否则中文回执会出现 `「active」`）。
 - `continuation.ts`：`label.autoContinue` 走 `deps.messages`（`noticeLine` 保留，语言无关）。
 - `notice.ts`：`signalNotice(messages, status, message)` 改签名（内部按 `signal.*` 取模板）；`noticeLine` 不变。
 - `debug.ts`：表头/标签/`(none)`/`(unknown)`/yes-no 走 `deps.messages`。
-- `tools.ts`：`goal` 工具 `description` 走 `deps.messages`；`goalToolInput` 由模块常量改为**按 messages 构建**，并**新增参数说明**（`op` / `objective` / `token_budget` / `blocker_key` / `blocker`）。`server.ts` 的 `goal_debug` 工具描述与 `op` 说明走 `messages`。
+- `tools.ts`：`goal` 工具 `description` 走 `deps.messages`；`goalToolInput` 由模块常量改为**按 messages 构建**，并**新增参数说明**（`op` / `objective` / `token_budget` / `blocker_key` / `blocker`）。`server.ts` 的 `goal_debug` 工具描述与 `op` 说明走 `messages`。**工具 schema 本地化作为独立任务实现**，便于单独回退（见 §8）。
 - 状态词本地化：`statusLabel(messages, status)` 用穷举 `switch`（`active`/`paused`/`blocked`/`budget-limited`/`usage-limited`/`complete`）。
 
 ### 3.6 数据流
@@ -112,6 +118,8 @@ export function format(template: string, params: Record<string, string | number>
 - **热重载**：与既有机制无关；但实现期间改 `src/**` 会触发宿主热重载（见 §7）。
 
 ## 5. 文案清单（权威）
+
+> 范围 = **TUI 面向用户**的文案 + **工具 schema**（模型可见）。**不含**：`prompts/index.ts` 的提示词、工具错误信息、工具输出 `completionBudgetReport`、配置校验错误、`console.error` 日志（见 §2）。`debug.usage` 的 en 值由现状的 `用法:` 改为 `usage:`，属修正既有中英混排。
 
 > 占位符 `{...}` 由 `format` 替换。`en` 为默认；`zh-CN` 为中文。
 
@@ -164,7 +172,7 @@ export function format(template: string, params: Record<string, string | number>
 | `signal.detail` | : {message} | ：{message} |
 | `signal.blocked` | Goal marked blocked{detail}. Use /goal-resume after resolving it. | 目标已标记为受阻{detail}。解决后可用 /goal-resume 继续。 |
 
-`signalNotice(messages, status, message)` 的实现：`detail` = 有非空 message 时 `format(messages["signal.detail"], { message: 压平后的 message })`，否则空串；再 `format(messages["signal." + status], { detail })`。冒号随语言由 `signal.detail` 提供，模板本身不含冒号。`status` 只可能是 `usage-limited` / `budget-limited` / `blocked`（调用点保证）。
+`signalNotice(messages, status: "usage-limited" | "budget-limited" | "blocked", message)` 的实现：`detail` = 有非空 message 时 `format(messages["signal.detail"], { message: 压平后的 message })`，否则空串；再 `format(messages["signal." + status], { detail })`。冒号随语言由 `signal.detail` 提供，模板本身不含冒号。调用点 `events.ts` 需先把 `after.status`（类型 `GoalStatus`）**收窄**到上述三值联合（穷举 guard），否则 `"signal." + status` 在严格模式下编译不过。
 
 ### 5.5 调试输出（`debug.ts`）
 
@@ -188,9 +196,11 @@ export function format(template: string, params: Record<string, string | number>
 | `debug.state.pendingBackground` | pending background: {value} | 待后台唤醒：{value} |
 | `debug.state.blockedThisTurn` | blocked this turn: {value} | 本轮已受阻：{value} |
 | `debug.state.goal` | goal: {goal} | 目标：{goal} |
-| `debug.unknown` | Unknown debug subcommand: {op}\n{usage} | 未知的调试子命令：{op}\n{usage} |
+| `debug.unknownSubcommand` | Unknown debug subcommand: {op}\n{usage} | 未知的调试子命令：{op}\n{usage} |
 | `debug.none` | (none) | （无） |
 | `debug.unknownValue` | (unknown) | （未知） |
+| `debug.unknown` | unknown | 未知 |
+| `debug.noTrackedState` | (no tracked state) | （无跟踪状态） |
 | `debug.yes` | yes | 是 |
 | `debug.no` | no | 否 |
 
@@ -215,15 +225,21 @@ export function format(template: string, params: Record<string, string | number>
 
 **单测**：
 
-- `i18n/language.test.ts`：`toLanguage`（`zh`/`zh-CN`/`zh-Hans-CN`→`zh-CN`；`en`/`en-US`→`en`；`C`/``/`fr`→`undefined`；大小写与 `_` 归一）；`resolveLanguage`（显式优先；系统 `zh-CN`→`zh-CN`；系统 `fr`→`en`；显式 + 系统都空→`en`）；`systemLocale()` 返回非空字符串。
-- `i18n/messages.test.ts`：`format` 替换已知占位符、未提供占位符原样保留、数字转字符串；两语言**键集合一致**（运行时断言 `Object.keys(en).sort()` === `Object.keys(zh).sort()`，作为 TS 之外的第二道防线）；无空值；抽样断言 zh-CN 含中文、en 不含（防「忘了翻」）。
-- `config.test.ts`：`language` 缺省 → `undefined`；`"zh"`/`"zh-CN"`/`"EN"` 归一；非字符串或无法识别 → 抛错。
+- `i18n/language.test.ts`：`toLanguage`（`zh`/`zh-CN`/`zh-Hans-CN`→`zh-CN`；`en`/`en-US`→`en`；`C`/``/`fr`→`undefined`；大小写与 `_` 归一）；`resolveLanguage`（显式优先；系统 `zh-CN`→`zh-CN`；系统 `fr`→`en`；显式与系统都空→`en`）；`systemLocale()` 返回非空字符串。
+- `i18n/messages.test.ts`：
+  - `format` 替换已知占位符、未提供占位符原样保留、数字转字符串、含 `$&`/`$1` 的文本不被特殊解释。
+  - 两语言**键集合一致**（运行时断言，作为 TS 之外第二道防线）；无空值。
+  - **占位符对齐**：对每个键，从 en/zh 值中提取 `{...}` 集合并断言相等（`satisfies Messages` 只校验键与类型，**不校验占位符**）。
+  - **无残留占位符**：对组合模板（`status.line`、`signal.*`、`debug.*`）用完整参数渲染后断言不含 `/\{[a-zA-Z]+\}/`。
+  - 防「忘了翻」：抽样断言 zh 与 en 值**不相等**（不断言「含汉字」——`signal.detail` 的 zh 值 `：{message}` 无汉字）。
+- `config.test.ts`：`language` 缺省 → `undefined`；`"zh"`/`"zh-CN"`/`"EN"`/`"zh_CN"` 归一；非字符串或无法识别 → 抛错；`DEFAULT_OPTIONS` 不含 `language`。
 
-**现有测试适配**（新增必填 `GoalDeps.messages`）：
+**现有测试适配**：
 
-- 构造 `GoalDeps` 的测试 helper 补 `messages: messagesFor("en")`（保持英文断言不变）：`src/host/commands.test.ts`、`src/host/continuation.test.ts`、`src/host/debug.test.ts`、`src/host/events.test.ts`、`src/host/hooks.test.ts`、`src/host/tools.test.ts`、`src/server.test.ts`。`notice.test.ts` / `turn.test.ts` / `plan.test.ts` / `generation.test.ts` 不构造 deps，无需改。
+- 构造 `GoalDeps` 的测试 helper 补 `messages: messagesFor("en")`（保持英文断言不变）：`src/host/commands.test.ts`、`src/host/continuation.test.ts`、`src/host/debug.test.ts`、`src/host/events.test.ts`、`src/host/hooks.test.ts`、`src/host/tools.test.ts`。`notice.test.ts` / `turn.test.ts` / `plan.test.ts` / `generation.test.ts` 不构造 deps，无需改。
+- `src/server.test.ts` **不构造 `GoalDeps`**（走 `plugin.setup(mockCtx)`）：其 `mockCtx` 的 `options` 由 `{}` 改为**显式 `{ language: "en" }`**，否则 `setup` 会按本机系统 locale（`zh-CN`）解析，导致 `"Goal request · ship it"` / `toContain("debug env")` 等英文断言失败。**凡经 `setup` 的测试都必须显式固定语言**，不得依赖机器 locale。
 - `tools.ts` 的 `goalToolInput` 由模块常量改为按 messages 构建（当前仅 `tools.ts` 内部使用，无外部导入）。
-- 保持英文断言不变（注入 en）；另补**少量中文用例**：如 `commands.test.ts` 用 zh-CN 断言 `notice.noGoal` 文案、`tools.test.ts` 断言工具描述随语言变化。
+- 另补**少量中文用例**：如 `commands.test.ts` 用 zh-CN 断言 `notice.noGoal` 文案、`tools.test.ts` 断言工具描述随语言变化。
 
 **验收**：`bun test` 全绿 + `bunx tsc --noEmit` 无错。
 
@@ -242,14 +258,18 @@ export function format(template: string, params: Record<string, string | number>
 | 系统 locale 探测到意外值（`C` / `POSIX` / 空） | `toLanguage` 取主语言子标签 + 兜底 `en`；配置项可显式覆盖 |
 | 宿主 server 进程的 locale 与用户预期不符（如以 `LANG=C` 启动） | 配置项 `language` 覆盖 |
 | 漏翻某键 | `satisfies Messages` 编译期报错 + `messages.test.ts` 运行时键集合断言 |
-| 占位符拼错导致 `{foo}` 泄漏到界面 | `messages.test.ts` 抽样；占位符集合小、评审可覆盖 |
+| 占位符跨语言不对齐（`satisfies` 不校验占位符） | `messages.test.ts` 提取两语言占位符集合断言相等 + 组合模板渲染后无残留 `{...}` |
+| `setup` 级测试依赖机器 locale → 断言随机器变化 | 经 `setup` 的测试显式传 `language`（§6），不依赖系统探测 |
+| 插件语言与宿主 UI 语言不一致（宿主 UI 有独立 i18n，但不暴露给插件，见 §9） | `language` 显式覆盖；文档说明 |
+| 配置校验错误未本地化（英文） | 已声明为非目标（§2） |
 
 ## 9. 参考
 
-- 宿主：`packages/plugin/src/**`（`Plugin.Context` 无 locale）、`packages/web/src/i18n/locales.ts`（宿主的 i18n 只用于文档站，与插件无关）。
+- 宿主：`packages/plugin/src/**`（`Plugin.Context` 无 locale，已核实）；宿主 UI 侧另有独立 i18n（`packages/app/src/runtime/i18n/language.tsx`、`packages/ui/src/context/i18n.tsx`），但**不通过插件 API 暴露**，故插件只能用 `Intl` 探测系统 locale。
 - 生态参考：OMP `packages/coding-agent/src/**/i18n.ts`、prevalentWare 插件 `i18n.ts`（均为 TS 模块字典）。
 - 本仓库：`src/host/commands.ts`、`src/host/notice.ts`、`src/host/continuation.ts`、`src/host/debug.ts`、`src/host/tools.ts`、`src/server.ts`、`src/config.ts`、`docs/opencode/config-install.md`。
 
 ## 10. 修订记录
 
 - **2026-09-25（初稿）**：确认宿主不提供 locale、系统 locale 可探测；确定「每语言一 TS 模块 + 键值字典 + `{占位符}` + `format`」；默认跟随系统 + `language` 覆盖；范围 = 用户可见文案 + 工具描述/参数说明（不含模型提示词/工具错误/工具输出）；完成全部文案清单。
+- **2026-09-25（独立子代理审阅后修订，并入 8 条）**：① §6 修正 `server.test.ts` 适配（走 `setup`，须显式 `language: "en"`，否则被系统 locale 带成中文）；② §5.5 补 3 处遗漏的用户可见调试字符串（新增 `debug.unknown` / `debug.noTrackedState`，原「Unknown debug subcommand」更名 `debug.unknownSubcommand`）；③ §1 措辞（并非全英文，`debug.usage` 已中英混排）；④ §9 更正宿主 UI 有独立 i18n、只是不暴露给插件，并在 §8 补该风险；⑤ §2/§5 明确配置校验错误与 `console.error` 日志保持英文（非目标）；⑥ §5.4 `signalNotice` 形参收窄为三值联合并在调用点 guard；⑦ §6 新增占位符对齐与无残留测试；⑧ §3.5 `notice.nothingToPause/Resume` 的 `{status}` 也走 `statusLabel`。
