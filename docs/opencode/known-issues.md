@@ -144,6 +144,7 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 
 - #38825 被维护者以「该泄漏路径已不可达」关闭（称 `ctx.event.subscribe` 随 namespaced hook API 移除）。**但那修的是「Promise 插件 `for await` 未调 `return()`」，与本插件的「`refCount>0` 时 cleanup 根本不被调用」是两条路径。**
 - 本仓库 2026-09-25 已就 #36677 补充探针复现与根因：<https://github.com/anomalyco/opencode/issues/36677#issuecomment-5826615158>
+- 同日在 #51128 补充 v2.0.15 实测佐证（`Failed to drain Session` + `ModelUnavailableError` + 技能全被标记移除）：<https://github.com/anomalyco/opencode/issues/51128#issuecomment-5826624809>
 - **动作**：跟踪上游；若 #51133 / #36677 关闭并回归验证后删条目。
 
 ### [ ] 升级复核：`ctx.event`（单数）是否仍存在（可能被 namespaced hook API 取代）
