@@ -88,6 +88,7 @@ async function renderState(deps: GoalDeps, pluginId: string, sessionID: string, 
     `agent: ${state?.agent ?? "unknown"}`,
     `session directory cache: ${cache === undefined || cache === null ? "(none)" : cache}`,
     `pending automatic: ${state === undefined ? "-" : state.pendingAutomatic}`,
+    `pending background: ${state === undefined ? "-" : state.pendingBackground}`,
     `blocked this turn: ${state === undefined ? "-" : state.blockedThisTurn}`,
     `goal: ${goal === undefined ? "(none)" : `${goal.status}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`}`,
   ])

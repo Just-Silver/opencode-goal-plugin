@@ -122,4 +122,14 @@ describe("createDebug", () => {
     expect(text).toContain("Unknown debug subcommand")
     expect(text).toContain("events")
   })
+
+  test("state reports the pending background count", async () => {
+    const { debug, router } = makeDebug(makeDeps())
+    await router.handle({
+      type: "session.tool.success",
+      data: { sessionID: "ses_1", metadata: { status: "running", shellID: "sh_1" } },
+    })
+    const text = await debug.render("state", "ses_1")
+    expect(text).toContain("pending background: 1")
+  })
 })
