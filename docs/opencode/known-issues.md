@@ -149,7 +149,7 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 
 ## V2 待办（V1 收尾时确认推迟）
 
-> 2026-09-25 V1 收尾：以下两项**确认不做**，移交 V2。
+> 2026-09-25 V1 收尾：以下项**确认推迟**，移交 V2。（原「0.1.1 发布推迟」一项已于 2026-09-25 完成发布，见 `CHANGELOG.md` 的 `[0.1.1]` 与 GitHub Release `v0.1.1`。）
 
 ### [ ] 后台任务（background subagent / shell）运行期间不应自动续跑
 
@@ -178,11 +178,3 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 - **保守原则**：metadata 缺失时**宁可漏 defer，不可永久卡死**（照常续跑）。
 
 **验证**：冒烟加 `background` 场景——起后台任务 → 断言**不**自动续轮 → 完成通知后才续。
-
-### [ ] 0.1.1 发布推迟到 V2 作为起点
-
-**现状（2026-09-25）**：`package.json` 版本 = `0.1.1`、`CHANGELOG.md` 的 `[0.1.1]` 小节已整理并通过 `scripts/changelog.mjs check --tag v0.1.1`；`[Unreleased]` 为空。**未打 tag、未触发 Release 工作流、未 `npm publish`**，npm 线上仍是 `0.1.0`。
-
-**决定**：V1 到此结束；**保留 0.1.1 作为 V2 发布时的起点**，不在 V1 阶段发布。V2 开发时在其上继续（或再 bump）。
-
-**交接**：发版流程见 `docs/opencode/releasing.md`（OIDC / Trusted Publisher 已配置；`release.yml` 的 `workflow_dispatch` 只 `npm publish --dry-run`，tag `v*` 才真发布）。

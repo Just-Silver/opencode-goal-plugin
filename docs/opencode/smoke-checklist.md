@@ -64,4 +64,6 @@
 
 调试时间戳（第 7 项）：`clock()` 改本地墙钟 `HH:mm:ss.SSS`，由 `src/host/debug.ts` 的 `debug.test.ts`（非 UTC 断言）覆盖。
 
-**发布相关（npm 渠道升级 / OIDC 真实发布）**：**推迟到 V2**（0.1.1 保留为 V2 发布起点），见 `known-issues.md` 的「V2 待办」。
+**发布（OIDC 真实发布）**：**2026-09-25 已发布 `0.1.1`** —— tag `v0.1.1` → CD 走 OIDC，npm `@justsilver/opencode-goal-plugin@0.1.1` 已上线（`latest = 0.1.1`、provenance 已签名并写入 sigstore 透明日志），GitHub Release `v0.1.1` 已建。
+
+**npm 渠道升级验证**：`opencode plugin add` 已验证可用（从 registry 解析并安装 `0.1.0`）；`opencode plugin check` / `update` 的端到端验证受本机**共享 host server** 限制（CLI 复用已在跑的 server，读的是真实全局配置，临时 `OPENCODE_CONFIG_DIR` / `OPENCODE_TEST_HOME` 均无法隔离），**未完成**。该路径是宿主行为（本插件无任何相关代码），建议在干净环境（独立 HOME + 无在跑 server）补测。
