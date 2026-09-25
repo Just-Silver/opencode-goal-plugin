@@ -44,7 +44,7 @@
 
 ## 5. 自动化场景一览（`scripts/smoke-api.mjs`）
 
-`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty` / `compaction`。
+`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `background` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty` / `compaction`。
 
 ## 6. 验收结果（2026-09-25，V1 收尾）
 

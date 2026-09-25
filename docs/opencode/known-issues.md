@@ -150,31 +150,4 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 ## V2 待办（V1 收尾时确认推迟）
 
 > 2026-09-25 V1 收尾：以下项**确认推迟**，移交 V2。（原「0.1.1 发布推迟」一项已于 2026-09-25 完成发布，见 `CHANGELOG.md` 的 `[0.1.1]` 与 GitHub Release `v0.1.1`。）
-
-### [ ] 后台任务（background subagent / shell）运行期间不应自动续跑
-
-**现象**：OpenCode V2 支持后台 subagent 与后台 shell（工具入参 `background: true`）。后台任务运行期间**主会话会照常发 `session.execution.succeeded`**，本插件只认「`execution.succeeded` + 目标 active」→ **会立刻注入一轮 `Goal auto-continue`**。
-
-**根因（宿主架构，非本插件 bug）**：
-
-- `packages/core/src/session/execution.ts` 的 `settled`：drain 一结束就发 `Execution.Succeeded`；`Job` 是 core 内部**独立**服务（`job.ts`，进程本地），后台 job 不阻塞 drain。
-- 后台 shell/subagent 的 `execute` 返回 `status: "running"` 后本步即完成 → 模型结束本轮 → `execution.succeeded`。
-- 这与宿主自己的指引冲突：后台工具返回文本明确写着「DO NOT poll… end your response; **you will be resumed automatically when the command finishes**」。宿主的意图是「结束本轮、等完成通知再醒」。
-
-**影响**：抢跑 / 重复工作、额外 token，甚至可能在后台任务完成前就误判目标完成。**spec 原就把「子会话 deferral」列为阶段二非目标**（`spec §12/§15`、plan「v1 边界」），但**后台 shell** 让影响面比子代理更大。
-
-**宿主有没有专门钩子/事件？——没有**：
-
-- 插件 `SessionDomain`（`packages/plugin/src/promise/session.ts`）**无 job 接口**；
-- `session-event` 清单（`packages/schema/src/session-event.ts` 的 `Definitions`）**无** `session.job.*` / `session.background.*`；
-- HTTP 仅 `POST /api/session/{id}/background`（把**前台**任务转后台，写操作，非查询）；
-- `session.get` 的 Info 无 pending 字段。
-
-**建议修法（推断信号，非官方保证）**：
-
-- **起**：`session.tool.called` 的 `input.background === true`；或工具结果 metadata `status: "running"` + `shellID`/`sessionID`（覆盖「用户中途 `session.background` 把前台任务转后台」）。
-- **止**：宿主完成时向父会话投递 synthetic 通知，metadata 带 `source: "subagent"`（+`childID`/`state`，`subagent-completion.ts:42`）或 `source: "shell"`（+`shellID`/`jobID`/`state`，`shell/result.ts:52`）；该通知本身会唤醒父会话。
-- 插件维护「本会话 pending 后台任务」集合（key 用 shellID / child sessionID），`continuation.onIdle` 前非空则**跳过**；通知到达 / 中断 / 删除时清理；`goal_debug` 暴露 pending 数。
-- **保守原则**：metadata 缺失时**宁可漏 defer，不可永久卡死**（照常续跑）。
-
-**验证**：冒烟加 `background` 场景——起后台任务 → 断言**不**自动续轮 → 完成通知后才续。
+> 「后台任务（background subagent / shell）运行期间不应自动续跑」已于 V2 子项目 2 实现（见 `CHANGELOG.md` 的 `[Unreleased]`），条目移出。
