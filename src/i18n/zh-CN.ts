@@ -8,7 +8,7 @@ const zhCN = {
   "cmd.resume": "恢复已暂停、受阻、预算用尽或用量受限的目标。",
   "cmd.clear": "清除目标记录。",
   "cmd.debug": "goal 插件的只读诊断（不触发模型轮）。",
-  "cmd.budget": "设置当前目标的 token 预算（正整数，或「none」取消预算）。",
+  "cmd.budget": "设置当前目标的 token 预算（正整数，或「none」/0 取消预算）。",
   "notice.noGoal": "本会话未设置目标。",
   "notice.paused": "目标已暂停。",
   "notice.resumed": "目标已恢复。",

@@ -8,7 +8,7 @@ const en = {
   "cmd.resume": "Resume a paused, blocked, budget-limited, or usage-limited goal.",
   "cmd.clear": "Clear the goal record.",
   "cmd.debug": "Read-only diagnostics for the goal plugin (no model turn).",
-  "cmd.budget": 'Set the token budget for the current goal (a positive integer, or "none" to remove it).',
+  "cmd.budget": 'Set the token budget for the current goal (a positive integer, or "none"/0 to remove it).',
   "notice.noGoal": "No goal is set for this session.",
   "notice.paused": "Goal paused.",
   "notice.resumed": "Goal resumed.",

@@ -37,7 +37,10 @@ export function parseBudgetArg(text: string): BudgetArg {
   const trimmed = text.trim()
   if (trimmed.length === 0) return { kind: "usage" }
   if (/^(none|off|0)$/i.test(trimmed)) return { kind: "clear" }
-  if (/^[1-9]\d*$/.test(trimmed)) return { kind: "set", budget: Number(trimmed) }
+  if (/^[1-9]\d*$/.test(trimmed)) {
+    const value = Number(trimmed)
+    return Number.isSafeInteger(value) ? { kind: "set", budget: value } : { kind: "invalid", value: trimmed }
+  }
   return { kind: "invalid", value: trimmed }
 }
 

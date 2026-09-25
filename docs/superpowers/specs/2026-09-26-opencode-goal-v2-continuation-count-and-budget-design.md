@@ -181,7 +181,7 @@ export function setBudget(goal: Goal, change: BudgetChange): Goal
 
 | Key | en | zh-CN |
 | --- | --- | --- |
-| `cmd.budget`（新） | Set the token budget for the current goal (a positive integer, or "none" to remove it). | 设置当前目标的 token 预算（正整数，或「none」取消预算）。 |
+| `cmd.budget`（新） | Set the token budget for the current goal (a positive integer, or "none"/0 to remove it). | 设置当前目标的 token 预算（正整数，或「none」/0 取消预算）。 |
 | `notice.budgetSet`（新） | Budget set to {budget}; goal is now {status}. | 预算已设为 {budget}；目标当前为「{status}」。 |
 | `notice.budgetCleared`（新） | Budget removed (unlimited); goal is now {status}. | 已取消预算（不限）；目标当前为「{status}」。 |
 | `notice.budgetUsage`（新） | Usage: a positive integer, or "none" to remove the budget. | 用法：正整数，或「none」取消预算。 |

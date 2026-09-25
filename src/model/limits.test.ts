@@ -126,6 +126,26 @@ describe("setBudget", () => {
     expect(setBudget(base({ status: "complete", tokensUsed: 100 }), { budget: 50, now: 7 }).status).toBe("complete")
   })
 
+  test("clearing the budget never changes a blocked / usage-limited / paused / complete status", () => {
+    expect(setBudget(base({ status: "blocked", tokensUsed: 100 }), { budget: undefined, now: 7 }).status).toBe("blocked")
+    expect(setBudget(base({ status: "usage-limited", tokensUsed: 100 }), { budget: undefined, now: 7 }).status).toBe(
+      "usage-limited",
+    )
+    expect(setBudget(base({ status: "paused", tokensUsed: 100 }), { budget: undefined, now: 7 }).status).toBe("paused")
+    expect(setBudget(base({ status: "complete", tokensUsed: 100 }), { budget: undefined, now: 7 }).status).toBe(
+      "complete",
+    )
+  })
+
+  test("a sufficient budget leaves blocked / usage-limited / paused / complete untouched", () => {
+    expect(setBudget(base({ status: "blocked", tokensUsed: 10 }), { budget: 500, now: 7 }).status).toBe("blocked")
+    expect(setBudget(base({ status: "usage-limited", tokensUsed: 10 }), { budget: 500, now: 7 }).status).toBe(
+      "usage-limited",
+    )
+    expect(setBudget(base({ status: "paused", tokensUsed: 10 }), { budget: 500, now: 7 }).status).toBe("paused")
+    expect(setBudget(base({ status: "complete", tokensUsed: 10 }), { budget: 500, now: 7 }).status).toBe("complete")
+  })
+
   test("rejects a non-positive / non-integer budget", () => {
     for (const budget of [0, -1, 1.5])
       expect(() => setBudget(base(), { budget, now: 7 })).toThrow(GoalError)

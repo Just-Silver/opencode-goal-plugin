@@ -231,6 +231,10 @@ describe("parseBudgetArg", () => {
     for (const raw of ["-5", "1.5", "5x", "500 000"])
       expect(parseBudgetArg(raw)).toEqual({ kind: "invalid", value: raw })
   })
+
+  test("rejects an integer that cannot be represented exactly", () => {
+    expect(parseBudgetArg("9007199254740993")).toEqual({ kind: "invalid", value: "9007199254740993" })
+  })
 })
 
 describe("budget command", () => {

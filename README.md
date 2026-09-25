@@ -42,7 +42,7 @@
 | `/goal-pause` | 暂停 |
 | `/goal-resume` | 恢复（含受阻 / 预算用尽 / 用量受限） |
 | `/goal-clear` | 清除目标 |
-| `/goal-budget <正整数\|none>` | 改当前目标的 token 预算（`none` 取消预算、不限） |
+| `/goal-budget <正整数\|none>` | 改当前目标的 token 预算（`none`/`0`/`off` 取消预算、不限） |
 
 设定后目标会在多轮之间持续：一轮结束、空闲时自动接着干，直到完成、暂停、受阻或超出预算。
 
