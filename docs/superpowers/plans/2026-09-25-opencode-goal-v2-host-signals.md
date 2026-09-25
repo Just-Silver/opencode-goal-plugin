@@ -414,7 +414,7 @@ import type { Goal, GoalLastError, GoalStatus, GoalUsage } from "./types"
 
 - [ ] **Step 4: 改 `src/store/repository.ts` 的 `decodeGoal`**
 
-把 `decodeGoal` 中「usage 可选校验」那段（`if (record.usage !== undefined …) { … return … }`）替换为统一处理：
+把 `decodeGoal` 中「usage 可选校验」那段（`if (record.usage !== undefined …) { … return … }`，**连同它上面第 34 行那句 usage 注释一起**）替换为统一处理（避免留下重复注释）：
 
 ```ts
   // 可选展示字段：形状不对就丢弃该字段、保留目标（不因为一个字段把整条记录判死）。
@@ -461,6 +461,7 @@ git commit -m "feat(model,store): lastError 的展示与持久化校验"
 - Modify: `src/host/notice.ts`
 - Modify: `src/host/events.ts`
 - Modify: `src/host/events.test.ts`
+- Modify: `src/host/debug.test.ts:42`
 - Modify: `src/server.ts:59`
 
 **Interfaces:**
@@ -494,6 +495,12 @@ const executionFailedWithError = (sessionID: string, error: Record<string, unkno
 })
 ```
 
+> **`notify` 是必填第三参**，因此还要改两处**直接**调用 `createEventRouter` 的既有测试（第三参传空实现即可）：
+> - 本文件的 `an unlocated execution end is admitted via the session's directory` 与 `unlocated events for another location's session are ignored`：`createEventRouter(deps, { onIdle: … }, async () => {})`；
+> - `src/host/debug.test.ts:42`：`const router = createEventRouter(deps, { onIdle: async () => false }, async () => {})`。
+>
+> 漏改这 3 处 → `bunx tsc --noEmit` 报 TS2554（`bun test` 不类型检查，不会暴露）。
+
 在 `describe("createEventRouter", …)` 内、末尾加：
 
 ```ts
@@ -511,6 +518,16 @@ const executionFailedWithError = (sessionID: string, error: Record<string, unkno
     expect(goal?.lastError).toEqual({ type: "provider.quota", message: "weekly usage limit reached", at: 1000 })
     expect(notices).toHaveLength(1)
     expect(notices[0]).toContain("usage-limited")
+  })
+
+  test("a quota failure with an empty message omits the detail clause", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "" }))
+    expect(notices[0]).toBe("Goal marked usage-limited. Use /goal-resume after the limit resets.")
   })
 
   test("an auth failure marks the goal blocked and notifies", async () => {
@@ -549,7 +566,7 @@ const executionFailedWithError = (sessionID: string, error: Record<string, unkno
   })
 
   test("a host signal does not touch a paused or completed goal", async () => {
-    for (const status of ["paused", "complete"] as const) {
+    for (const status of ["paused", "complete", "budget-limited"] as const) {
       const deps = makeDeps()
       const base = createGoal({ goalId: "g1", objective: "o", now: 0 })
       await deps.repo.save("ses_1", { ...base, status })
@@ -912,7 +929,7 @@ git commit -m "docs: 回填宿主信号→状态（CHANGELOG / known-issues）"
 **Type consistency：**
 - `HostSignal.status` 用字面量 `"usage-limited" | "blocked"`，与 `GoalStatus` 新增值一致。
 - `applyHostSignal(goal, now, signal)` 三参签名在 Task 1 定义、Task 4 使用一致。
-- `createEventRouter(deps, continuation, notify)` 三参签名在 Task 4 定义/使用一致（`server.ts`、`events.test.ts`）。
+- `createEventRouter(deps, continuation, notify)` 三参签名在 Task 4 定义；**全部调用点**都要改：`server.ts`、`events.test.ts` 的 `makeRouter` 与 2 处直连调用、`debug.test.ts:42`（Task 4 Step 1 已列明）。
 - `signalNotice(status, message)` 两参在 Task 4 定义/使用一致。
 - `GoalLastError` 在 Task 1 定义，Task 3 的 `GoalView.lastError: GoalLastError | null` 与 `isLastError` 校验字段（type/message/at）一致。
 
