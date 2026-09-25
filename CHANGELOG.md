@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
 ### Added
 
 - **后台任务 deferral**：后台 shell / 后台 subagent 运行期间，轮末**不再**自动续跑；宿主完成通知（`session.inbox.enqueued`）到达后恢复。起/止信号取自工具结果 metadata（`status:"running"`）与完成通知 metadata（`source:"shell"|"subagent"`），并带最外层标签文本兜底与乱序护栏。纯内存、不落 KV、不加配置项、不做超时放行（依赖宿主「完成即唤醒」保证）。
