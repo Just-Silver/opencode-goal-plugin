@@ -28,8 +28,26 @@
 }
 ```
 
-- 要钉住版本（可复现，代价是不再显示有新版）：`"plugins": ["@justsilver/opencode-goal-plugin@0.1.0"]`
+- 要钉住版本（可复现，代价是不再显示有新版）：`"plugins": ["@justsilver/opencode-goal-plugin@0.2.0"]`
 - 本地目录 / git 安装（改代码即热重载、用未发布的提交）见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+
+## 用法
+
+在会话里输入：
+
+| 命令 | 作用 |
+| --- | --- |
+| `/goal <目标>` | 设定目标；信息不够时它会先追问几个问题，够了再自动开始 |
+| `/goal`（或 `/goal-status`） | 查看当前目标与进度 |
+| `/goal-pause` | 暂停 |
+| `/goal-resume` | 恢复（含受阻 / 预算用尽 / 用量受限） |
+| `/goal-clear` | 清除目标 |
+
+设定后目标会在多轮之间持续：一轮结束、空闲时自动接着干，直到完成、暂停、受阻或超出预算。
+
+- **完成要拿证据**：模型必须核对当前状态，才敢说「完成」。
+- **受阻 / 预算 / 用量到达**时目标会停下并给出回执，可用 `/goal-resume` 继续。
+- 界面文案**默认跟随系统语言**，可用配置项 `language` 切换。
 
 ## 配置项
 
@@ -37,7 +55,7 @@
 | --- | --- | --- |
 | `token_budget` | 无 | 新目标的默认 token 预算 |
 | `max_goal_token_budget` | 无 | 允许的最大预算 |
-| `max_objective_chars` | 4000 | 目标注入的截断阈值（全文始终存 KV） |
+| `max_objective_chars` | 4000 | 目标注入提示词的截断阈值（超过仍保留全文，模型可完整取回） |
 | `blocked_threshold` | 3 | 连续阻塞多少轮算「卡住」 |
 | `empty_threshold` | 3 | 连续空转多少轮算「空转」 |
 | `reconcile_guard_minutes` | 5 | 启动兜底保护窗（分钟） |

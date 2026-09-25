@@ -84,12 +84,12 @@ npm publish                     # scoped 包，access 由 publishConfig.access=p
 ```bash
 # 1) 版本决策：fix → patch，feat → minor，破坏性变更 → major（0.x 阶段可随时破坏）
 # 2) 把 CHANGELOG 顶部的 [Unreleased] 整理成新版本小节（含 ISO 日期），并 bump 版本号：
-npm version patch --no-git-tag-version     # 只改 package.json，不自动建 tag/commit
-git add -A && git commit -m "chore(release): v0.1.1"
+npm version minor --no-git-tag-version     # 只改 package.json，不自动建 tag/commit（patch/minor/major 按决策）
+git add -A && git commit -m "chore(release): v0.2.0"
 # 3) 校验三处一致（本地先跑一遍，省得 CI 里才发现）
-node scripts/changelog.mjs check --tag v0.1.1
+node scripts/changelog.mjs check --tag v0.2.0
 # 4) 打 tag 并推送 → 触发 CD
-git tag v0.1.1 && git push origin main && git push origin v0.1.1
+git tag v0.2.0 && git push origin main && git push origin v0.2.0
 ```
 
 CD 会：跑测试与类型检查 → 校验 `tag == package.json == CHANGELOG` → 从 CHANGELOG 提取 Release body → `npm publish` → 建/更新 GitHub Release（`vX.Y.Z`）。

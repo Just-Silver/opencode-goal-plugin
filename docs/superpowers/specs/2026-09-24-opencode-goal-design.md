@@ -11,6 +11,8 @@
 
 **非目标（v1 不做，阶段二或永不）**：TUI 侧边栏；v1 兼容；`usage-limited`；宿主终态错误自动 `blocked`；子会话 deferral；i18n；遥测；跨会话列表。
 
+> **2026-09-25 更新（v0.2.0）**：`usage-limited`、宿主终态错误 → `blocked`、子会话 deferral、i18n 均已交付（见 `2026-09-25-opencode-goal-v2-host-signals-design.md` / `...-v2-background-deferral-design.md` / `...-v2-i18n-design.md`）；TUI 侧边栏待做；v1 兼容 / 遥测 / 跨会话列表仍不做。
+
 ## 2. 分发与安装
 
 - 配置安装：`opencode.json(c)` 的 `plugins` 数组，object 形式带 options：
@@ -135,7 +137,7 @@ goal({
 - **compaction**：`ctx.session.hook("compaction", ...)` 注入目标快照（objective/status/预算 + "仅 active 才继续"），保证压缩后模型仍知情。
 - **超长目标（>4000）**：KV 存全文；续跑时只注入**前 `max_objective_chars` 字 + "（已截断，调 `goal({op:"get"})` 取完整目标）"**；完成审计强制 `get_goal` 复核。
 
-## 9. 宿主信号 → 状态（阶段二）
+## 9. 宿主信号 → 状态（**已交付**，V2 子项目 3）
 
 经 `ctx.session.hook("retry", i => { i.error; i.decision })` 或事件：
 
@@ -204,6 +206,8 @@ goal({
 ## 15. 阶段二
 
 TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`；宿主终态错误 → `blocked`；子会话 deferral；i18n。
+
+- **2026-09-25 状态（v0.2.0）**：`usage-limited` + 宿主终态错误 → `blocked`（V2 子项目 3）、子会话 deferral（V2 子项目 2）、i18n 均**已交付**；TUI 侧边栏**待做**（V2 子项目 5）。
 
 - **跨会话列表：2026-09-25 决定不做。** 理由：① Codex / OMP **均无**此能力（非本取向内功能），唯一来源是第三方 prevalentWare 的 `list_all`；② 聚合需求已由 `/goal-debug sessions`（列出本 location 全部 goal 记录）覆盖；③ per-session 单目标工作流下收益低。若将来确有需求，最小做法是把 `/goal-debug sessions` 提升为正式只读命令（复用 `repository.listAll`，零新逻辑）。
 

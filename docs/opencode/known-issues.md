@@ -150,6 +150,7 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 ## V2 待办（V1 收尾时确认推迟）
 
 > 2026-09-25 V1 收尾：以下项**确认推迟**，移交 V2。（原「0.1.1 发布推迟」一项已于 2026-09-25 完成发布，见 `CHANGELOG.md` 的 `[0.1.1]` 与 GitHub Release `v0.1.1`。）
-> 「后台任务（background subagent / shell）运行期间不应自动续跑」已于 V2 子项目 2 实现（见 `CHANGELOG.md` 的 `[Unreleased]`），条目移出。
-> 「宿主信号 → 状态（`provider.quota` → `usage-limited`；宿主终态错误 → `blocked`）」已于 V2 子项目 3 实现（见 `CHANGELOG.md` 的 `[Unreleased]`），条目移出。
-> 「国际化（i18n）」已于 V2 实现（见 `CHANGELOG.md` 的 `[Unreleased]`）。默认跟随系统 locale，可用 `language` 覆盖。
+> **2026-09-25 更新（v0.2.0）**：V2 子项目 2/3 与 i18n 均已交付，下列条目**全部移出**。
+> 「后台任务（background subagent / shell）运行期间不应自动续跑」已于 V2 子项目 2 实现（见 `CHANGELOG.md` 的 `[0.2.0]`）。
+> 「宿主信号 → 状态（`provider.quota` → `usage-limited`；宿主终态错误 → `blocked`）」已于 V2 子项目 3 实现（见 `CHANGELOG.md` 的 `[0.2.0]`）。
+> 「国际化（i18n）」已于 V2 实现（见 `CHANGELOG.md` 的 `[0.2.0]`）。默认跟随系统 locale，可用 `language` 覆盖。

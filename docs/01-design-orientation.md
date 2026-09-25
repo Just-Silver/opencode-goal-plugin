@@ -4,6 +4,8 @@
 > 状态标记：**[定]** 已拍板 ／ **[议]** 待议。
 > **原则：OMP 与 Codex 一致处直接照抄；仅在其分歧或 OpenCode 约束处才讨论。**
 > 更新：2026-09-24。
+>
+> **实现状态（2026-09-25，v0.2.0）**：本文是 v1 取向快照。§7「阶段二」各项已陆续交付——`usage-limited` + 宿主终态错误 → `blocked`（V2 子项目 3，`2026-09-25-opencode-goal-v2-host-signals-design.md`）、子会话/后台 deferral（V2 子项目 2，`2026-09-25-opencode-goal-v2-background-deferral-design.md`）、i18n（`2026-09-25-opencode-goal-v2-i18n-design.md`）。**仍待做**：TUI 侧边栏（V2 子项目 5）。正文未逐条改写，以本说明与各 spec 为准。
 
 ## 0. 定位
 
@@ -52,7 +54,7 @@ goal({
 
 ## 4. 状态机 **[定]**
 
-`active | paused | blocked | budget-limited | complete`（`usage-limited` 视宿主信号，见待议）。
+`active | paused | blocked | budget-limited | usage-limited | complete`（`usage-limited` 由宿主信号置位，**已实现**）。
 
 不设终态 `unmet`——**"放弃/丢弃"由用户 `/goal clear` 处理**（[定]）。
 
@@ -111,7 +113,7 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
 - **续跑轮**：注入完整 continuation prompt（XML 转义 objective + 预算 + 完成审计 + blocked 门槛）。
 - **常态（普通用户轮）**：只注入**轻量** goal 提醒（"有 active 目标 → 先 get_goal；仅 active 才继续"），**不塞完整 objective**（学 Codex，省 token；模型需要时自行 `goal({op:"get"})`）。
 - **压缩恢复**：压缩时注入目标快照 + 常态轻量提醒 + 模型 get_goal 即可恢复，无需每轮背全文。
-- （子会话/工具 deferral、OpenCode 通用 post-compaction 续跑的抑制：阶段二。）
+- （子会话/工具 deferral：**已交付**，见 V2 子项目 2；OpenCode 通用 post-compaction 续跑的抑制：仍未做。）
 
 ## 6. 记账与持久化 **[定·倾向]**
 
@@ -140,7 +142,7 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
 - 默认预算：**不限**（一致）。
 - 目标长度：**上限 4000 字符**；超出**仍在 KV 里存全文**，续跑注入摘要 + `goal({op:"get"})` 取全文（不截断、不拒绝、无需文件）。
 - 作用域：**per-session**（Codex/OMP 均会话级）。
-- TUI 可视化：**阶段二**再做（按 config-install 方案 B：不用 Solid/JSX）。
+- TUI 可视化：**待做**（V2 子项目 5；按 config-install 方案 B：不用 Solid/JSX）。
 - `blocked`：**要**，采用"模型报 blocker + 服务端连续轮计数（blocker_key，阈值 3）"。
 - **上限**：`token_budget` 可选（默认无）＋可选 `max_goal_token_budget` 配置；**无轮次/时长上限**（照抄 OMP/Codex）。
 
@@ -151,19 +153,21 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
 - **持久化**：`ctx.storage`（持久 KV）+ reconcile 用 `ctx.session.get(id)`。
 - **token 来源**：assistant 消息 `tokens{input,output,reasoning,cache{read,write}}` / `step.ended{tokens}`。
 
-**阶段二（v1 不做）**：
-1. `usage-limited`：映射 `QuotaExceeded` / Go/FreeUsageLimit。
-2. 宿主终态错误 → 自动 `blocked`（见下表）。
-3. i18n：不做（英文模板 + 模型跟随用户语言）。
+**阶段二进展（2026-09-25 更新）**：
+1. `usage-limited`：**已交付**（V2 子项目 3，v0.2.0）——`provider.quota` → `usage-limited`。
+2. 宿主终态错误 → 自动 `blocked`：**已交付**（V2 子项目 3）——仅 `provider.auth` / `provider.content-filter` / `provider.invalid-request`；`no-route` 等**明确排除**（见下表）。
+3. i18n：**已交付**（v0.2.0）——面向用户文案与工具 schema 中英双语，默认跟随系统 locale。
+4. 子会话/后台 deferral：**已交付**（V2 子项目 2，v0.2.0）。
+5. TUI 侧边栏：**待做**（V2 子项目 5）。
 
-**宿主信号 → 状态映射**
+**宿主信号 → 状态映射（实现后口径）**
 
-| 宿主信号 | 映射 | 阶段 |
+| 宿主信号 | 映射 | 状态 |
 | --- | --- | --- |
-| 不可重试错误（InvalidRequest/Authentication/ContentPolicy/NoRoute/InvalidProviderOutput/UnknownProvider/Transport/context-overflow） | `blocked` | 二 |
-| `QuotaExceeded` / Go/FreeUsageLimit | `usage_limited` | 二 |
-| 可重试（RateLimit/ProviderInternal 5xx） | 忽略（会话继续） | — |
-| 连续 3 轮自动续跑 `empty_final && !has_activity` | `blocked` | **v1** |
+| `provider.auth` / `provider.content-filter` / `provider.invalid-request` | `blocked` | 已交付 |
+| `provider.quota`（含 Go/Free 用量上限） | `usage-limited` | 已交付 |
+| `provider.no-route` / `provider.timeout` / `provider.unsupported-operation` / 全部可重试类 | **不改状态** | 已交付（有意排除） |
+| 连续 3 轮自动续跑 `empty_final && !has_activity` | `blocked` | v1 |
 
 ## 8. 参考
 

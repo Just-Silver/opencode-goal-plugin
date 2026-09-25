@@ -1,9 +1,9 @@
 # opencode-goal V2 子项目 2 设计：后台任务 deferral
 
 - 日期：2026-09-25
-- 状态：**待审阅（已按独立审阅修正，见 §10）**
+- 状态：**已实现（v0.2.0，2026-09-25）**
 - 宿主：**OpenCode V2**（分支 `v2`，`@opencode/plugin@2.0.16`；宿主源码检出 `../Externals/opencode`）
-- 上级：V2 里程碑（`1 发布收尾 → 2 后台 deferral → 3 signals → 5 TUI 侧边栏`；`4 跨会话列表` 与 `6 i18n` 已砍）
+- 上级：V2 里程碑（`1 发布收尾 → 2 后台 deferral → 3 signals → i18n → 5 TUI 侧边栏`；`4 跨会话列表` 已砍；已随 **v0.2.0** 发布）
 - 相关：`docs/superpowers/specs/2026-09-24-opencode-goal-design.md`（v1）、`docs/opencode/known-issues.md`、`docs/00-comparison.md`
 
 ## 1. 背景与问题

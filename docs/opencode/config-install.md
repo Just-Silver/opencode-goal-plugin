@@ -179,6 +179,8 @@ export { default } from "./src/server"
 
 ## 9. 本地目录安装（补充；2026-09-25 在 opencode-goal 上实测）
 
+> **本项目现以 npm 包分发**：正式/日常安装用 `"plugins": ["@justsilver/opencode-goal-plugin"]`（见 §2/§5）。本地目录安装仅用于**改代码调试**（下面这套）；改用 npm 后改 `src/**` **不再**热重载运行中的插件，需 `opencode plugin update` + `opencode reload`。
+
 场景：不发布、也不走 git/npm spec，直接把**本机仓库目录**写进 `plugins[].package`（本地调试最省事，且改代码即时生效）。
 
 ```jsonc
