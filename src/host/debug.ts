@@ -35,8 +35,14 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`
 }
 
+function pad(value: number, width = 2): string {
+  return String(value).padStart(width, "0")
+}
+
+/** 本地墙钟时间 `HH:mm:ss.SSS`（调试输出给人看，用本地时区而非 UTC）。 */
 function clock(ms: number): string {
-  return new Date(ms).toISOString().slice(11, 23)
+  const d = new Date(ms)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
 }
 
 async function renderEnv(deps: GoalDeps, source: DebugSource, sessionID: string): Promise<string> {

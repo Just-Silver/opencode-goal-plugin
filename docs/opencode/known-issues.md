@@ -2,20 +2,6 @@
 
 > 只记**已定位、暂缓修复**的问题。每条要写清：现象 / 根因（含出处）/ 影响 / 建议修法 / 怎么验证。修完就删条目。
 
-### [ ] `/goal-debug events` 的时间戳按 UTC 显示，与本地时间差一个时区
-
-**现象**：`/goal-debug events` 打出的时间（如 `22:49:48.312`）与用户本地墙钟 / TUI 看到的时间对不上（本机 UTC+8，差 8 小时）。
-
-**根因**：`src/host/debug.ts` 的 `clock(ms)` 用 `new Date(ms).toISOString().slice(11, 23)` —— `toISOString()` 是 **UTC**；而 `ms` 来自 `deps.now()`（`Date.now()`，epoch，本身无时区）。宿主日志同样以 UTC（带 `Z`）打印，所以两者一致、但与本地时间差 8 小时。
-
-**影响**：纯只读诊断的显示误导；不影响任何业务判定。
-
-**建议修法**：按本地时间渲染（`toLocaleTimeString` / 手动加时区偏移），或显式在行首标注 `UTC`。
-
-**验证**：触发任意事件后，对比 `/goal-debug events` 的显示与同一条事件在 `~/.local/share/opencode/log/opencode.log`（UTC，带 `Z`）里的时间。
-
----
-
 ### [ ] 插件热重载后模型解析失败 → 该轮 drain 失败、自动续跑不触发（宿主 bug）
 
 **现象**：改动 `src/**`（或任何触发插件热重载的操作）时，若正好有会话在跑一轮，该轮以 `Failed to drain Session` 失败，且**不再自动续跑**（goal 停在 `active`、`tokensUsed=0`）。用户会误以为「新插件坏了、不续轮了」。

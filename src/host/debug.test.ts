@@ -88,6 +88,22 @@ describe("createDebug", () => {
     expect(text).toContain("active")
   })
 
+  test("events timestamps use local wall-clock time, not UTC", async () => {
+    const ms = Date.UTC(2026, 0, 2, 3, 4, 5, 678)
+    const deps = { ...makeDeps(), now: () => ms }
+    const { debug, router } = makeDebug(deps)
+    await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+    const text = await debug.render("events", "ses_1")
+    const d = new Date(ms)
+    const pad = (value: number, width = 2) => String(value).padStart(width, "0")
+    const local = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
+    expect(text).toContain(local)
+    // 非 UTC 机器上必须与 UTC 串不同（修复前用的就是 UTC）。
+    if (d.getTimezoneOffset() !== 0) {
+      expect(text).not.toContain(new Date(ms).toISOString().slice(11, 23))
+    }
+  })
+
   test("state reports the in-memory turn state", async () => {
     const { debug, router } = makeDebug(makeDeps())
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/goal-debug events` / `sessions` 的时间戳改为**本地墙钟时间**（`HH:mm:ss.SSS`）；原先用 `toISOString()` 输出 UTC，与本地时间差一个时区，纯属显示误导。
+
 ## [0.1.1] - 2026-09-25
 
 ### Changed
