@@ -151,7 +151,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     pendingBackground.set(sessionID, keys)
   }
 
-  /** 只从 pending 移除 key（不记 `recentlyCompleted`）；供 `completeBackground` 复用。 */
+  /** 只从 pending 移除 key（不记 `recentlyCompleted`）；供 completeBackground/forgetBackground 复用。 */
   const dropPendingKey = (key: string): void => {
     for (const [sid, keys] of pendingBackground) {
       keys.delete(key)
@@ -159,11 +159,32 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     }
   }
 
-  /** 后台任务「止」：记录完成时刻（无论是否命中 pending），并从所有会话移除该 key（spec §4.3）。 */
-  const completeBackground = (key: string): void => {
+  /** key 是否仍在任一会话的 pending 中。 */
+  const isPendingKey = (key: string): boolean => {
+    for (const keys of pendingBackground.values()) if (keys.has(key)) return true
+    return false
+  }
+
+  /** 记录完成时刻并惰性剪枝（供乱序护栏使用）。 */
+  const rememberCompleted = (key: string): void => {
     const now = deps.now()
     recentlyCompleted.set(key, now)
     for (const [k, at] of recentlyCompleted) if (now - at > RECENTLY_COMPLETED_TTL_MS) recentlyCompleted.delete(k)
+  }
+
+  /**
+   * 后台任务「止」：从所有会话移除该 key。**仅当完成通知先于起信号到达**（key 不在 pending，
+   * 移除是 no-op）时才落乱序护栏——正常「起→止」不落护栏，避免同一 key 合法复用
+   * （如 continue-existing subagent 复用同一子会话 id）被误挡（spec §4.3）。
+   */
+  const completeBackground = (key: string): void => {
+    if (!isPendingKey(key)) rememberCompleted(key)
+    dropPendingKey(key)
+  }
+
+  /** 会话删除：强制落护栏，防「删除后迟到的起信号」再入 pending（spec §4.4）。 */
+  const forgetBackground = (key: string): void => {
+    rememberCompleted(key)
     dropPendingKey(key)
   }
 
@@ -386,9 +407,9 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           turnOpen.delete(sessionID)
           turnUsage.delete(sessionID)
           sessionLocations.delete(sessionID)
-          // 后台 subagent 的子会话被删 → 从所有会话 pending 移除该 key，并记入护栏防「删除后迟到的起信号」再入 pending；
+          // 后台 subagent 的子会话被删 → 从所有会话 pending 移除该 key，并**强制**记入护栏防「删除后迟到的起信号」再入 pending；
           // 再清本会话自身 pending（spec §4.4）。
-          completeBackground(sessionID)
+          forgetBackground(sessionID)
           pendingBackground.delete(sessionID)
           return
         }
