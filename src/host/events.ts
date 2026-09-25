@@ -33,6 +33,8 @@ export interface DebugSessionState {
   readonly sessionDirectory: string | null | undefined
   readonly pendingAutomatic: boolean
   readonly blockedThisTurn: boolean
+  /** 本会话在跑的后台任务数（后台 shell / 后台 subagent）。 */
+  readonly pendingBackground: number
 }
 
 export interface DebugSnapshot {
@@ -70,11 +72,13 @@ const TRACKED_TYPES = new Set([
   "session.text.ended",
   "session.reasoning.ended",
   "session.tool.called",
+  "session.tool.success",
   "session.execution.started",
   "session.execution.succeeded",
   "session.execution.failed",
   "session.execution.interrupted",
   "session.deleted",
+  "session.inbox.enqueued",
 ])
 const DEBUG_EVENT_LIMIT = 50
 
@@ -86,6 +90,11 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
   const trackers = new Map<string, TurnTracker>()
   const turnOpen = new Set<string>()
   const turnUsage = new Map<string, TurnUsage>()
+  /**
+   * 本会话正在跑的后台任务 key（后台 shell = `shellID`；后台 subagent = 子会话 id）。
+   * 非空 → 该会话轮末不自动续跑，等宿主完成通知唤醒（spec §4.1/§4.5）。
+   */
+  const pendingBackground = new Map<string, Set<string>>()
   /** 事件不带 location 时的归属回落：会话所在目录缓存（每会话一次查询）。 */
   const sessionLocations = new Map<string, string | null>()
   const belongsToThisLocation = async (sessionID: string): Promise<boolean> => {
@@ -124,6 +133,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
       trackers.set(sessionID, current)
     }
     return current
+  }
+
+  /** 后台任务「起」：加入 pending（spec §4.2）。 */
+  const addPendingBackground = (sessionID: string, key: string): void => {
+    const keys = pendingBackground.get(sessionID) ?? new Set<string>()
+    keys.add(key)
+    pendingBackground.set(sessionID, keys)
   }
 
   const save = async (sessionID: string, mutate: (goal: Goal, now: number) => Goal): Promise<void> => {
@@ -224,6 +240,15 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           return
         }
 
+        case "session.tool.success": {
+          // 后台任务的「起」：仅当结果 metadata 标 `running`（前台结果为 `completed`/缺失 → 排除）。
+          const metadata = (data.metadata ?? {}) as Record<string, unknown>
+          if (metadata.status !== "running") return
+          if (typeof metadata.shellID === "string") addPendingBackground(sessionID, metadata.shellID)
+          else if (typeof metadata.sessionID === "string") addPendingBackground(sessionID, metadata.sessionID)
+          return
+        }
+
         // 轮边界用 session.execution.*（v2 后端真实事件）；session.status 是 deprecated 定义，
         // 后端从不 emit，曾导致轮结算与续跑永不执行（详见 docs 冒烟复盘）。
         case "session.execution.started": {
@@ -265,6 +290,8 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           // 只有成功结束才续跑：failed 保守跳过，避免在报错时形成续跑循环。
           if (event.type !== "session.execution.succeeded") return
           if (blocked) return
+          // 后台任务在跑 → 本轮不续跑；宿主完成通知会唤醒会话（spec §4.5）。
+          if ((pendingBackground.get(sessionID)?.size ?? 0) > 0) return
           const goal = await deps.repo.load(sessionID)
           if (!goal || goal.status !== "active") return
           // spec §12：agent 未知时保守跳过续跑，绝不回退成 "build" 放行受限 agent。
@@ -316,7 +343,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     },
 
     diagnostics() {
-      const ids = new Set<string>([...agents.keys(), ...sessionLocations.keys(), ...trackers.keys(), ...turnOpen])
+      const ids = new Set<string>([
+        ...agents.keys(),
+        ...sessionLocations.keys(),
+        ...trackers.keys(),
+        ...turnOpen,
+        ...pendingBackground.keys(),
+      ])
       return {
         events: [...debugEvents],
         sessions: [...ids].map((sessionID) => ({
@@ -326,6 +359,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           sessionDirectory: sessionLocations.get(sessionID),
           pendingAutomatic: pendingAutomatic.has(sessionID),
           blockedThisTurn: blockedThisTurn.get(sessionID) === true,
+          pendingBackground: pendingBackground.get(sessionID)?.size ?? 0,
         })),
       }
     },

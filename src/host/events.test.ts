@@ -48,12 +48,17 @@ function makeRouter(deps: GoalDeps, continuation: Continuation) {
     handle: (event: { type: string; data?: Record<string, unknown>; location?: { directory?: unknown } }) =>
       inner.handle({ location: { directory: deps.locationDirectory }, ...event }),
     pendingUsage: (sessionID: string) => inner.pendingUsage(sessionID),
+    diagnostics: () => inner.diagnostics(),
   }
 }
 
 const executionStarted = (sessionID: string) => ({ type: "session.execution.started", data: { sessionID } })
 const executionSucceeded = (sessionID: string) => ({ type: "session.execution.succeeded", data: { sessionID } })
 const executionFailed = (sessionID: string) => ({ type: "session.execution.failed", data: { sessionID } })
+const toolSuccess = (sessionID: string, metadata: Record<string, unknown>) => ({
+  type: "session.tool.success",
+  data: { sessionID, metadata },
+})
 
 describe("createEventRouter", () => {
   test("accrues tokens and continues once on execution end", async () => {
@@ -569,5 +574,50 @@ describe("createEventRouter", () => {
     await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
     await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
     expect(injected).toBe(0)
+  })
+
+  test("a running background shell defers continuation until it completes", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_1" }))
+    await router.handle(executionSucceeded("ses_1"))
+    // 后台任务在跑 → 不续跑
+    expect(prompts).toEqual([])
+  })
+
+  test("a foreground subagent result does not enter pending", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    // 前台 subagent：结果 metadata 是 completed（不是 running）→ 不计入
+    await router.handle(toolSuccess("ses_1", { status: "completed", sessionID: "ses_fg" }))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
+  })
+
+  test("diagnostics reports the pending background count", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_1" }))
+    const state = router.diagnostics().sessions.find((item) => item.sessionID === "ses_1")
+    expect(state?.pendingBackground).toBe(1)
   })
 })
