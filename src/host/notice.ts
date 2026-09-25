@@ -1,4 +1,4 @@
-import type { GoalStatus } from "../model/types"
+import { format, type Messages } from "../i18n/messages"
 
 /**
  * `session.synthetic` 在 TUI 里只渲染 `description`（notice 行，可换行）；
@@ -13,12 +13,14 @@ export function noticeLine(label: string, detail: string, max = 72): string {
 
 /**
  * 宿主信号改状态后的纯回执行（`session.synthetic` 的 description 与 text 同用）。
- * `status` 由调用点保证是信号或其预算升级后的终态（usage-limited / blocked / budget-limited）。
+ * `status` 由调用点收窄为信号或其预算升级后的终态（usage-limited / blocked / budget-limited）。
  */
-export function signalNotice(status: GoalStatus, message: string): string {
+export function signalNotice(
+  messages: Messages,
+  status: "usage-limited" | "budget-limited" | "blocked",
+  message: string,
+): string {
   const flat = message.replace(/\s+/g, " ").trim()
-  const detail = flat.length === 0 ? "" : `: ${flat}`
-  if (status === "usage-limited") return `Goal marked usage-limited${detail}. Use /goal-resume after the limit resets.`
-  if (status === "budget-limited") return `Goal marked budget-limited${detail}. Use /goal-resume to continue.`
-  return `Goal marked blocked${detail}. Use /goal-resume after resolving it.`
+  const detail = flat.length === 0 ? "" : format(messages["signal.detail"], { message: flat })
+  return format(messages[`signal.${status}`], { detail })
 }

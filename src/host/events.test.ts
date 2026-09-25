@@ -901,6 +901,17 @@ describe("createEventRouter", () => {
     expect(notices[0]).toBe("Goal marked usage-limited. Use /goal-resume after the limit resets.")
   })
 
+  test("a quota failure notice follows the injected language", async () => {
+    const deps = { ...makeDeps(), messages: messagesFor("zh-CN") }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "weekly usage limit" }))
+    expect(notices[0]).toBe("目标已标记为用量受限：weekly usage limit。配额恢复后可用 /goal-resume 继续。")
+    expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
+  })
+
   test("a budget upgrade after a host signal notifies with the final budget-limited status", async () => {
     const deps = makeDeps()
     // 未开轮 + 已超预算的 active 目标：信号落 usage-limited 后由 applyBudget 升级为 budget-limited

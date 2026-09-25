@@ -402,7 +402,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, no
           if (!before) return
           await save(sessionID, (goal, now) => applyHostSignal(goal, now, signal))
           const after = await deps.repo.load(sessionID)
-          if (after && after.status !== before.status) await notify(sessionID, signalNotice(after.status, signal.message))
+          const next = after?.status
+          if (
+            after &&
+            next !== before.status &&
+            (next === "usage-limited" || next === "budget-limited" || next === "blocked")
+          )
+            await notify(sessionID, signalNotice(deps.messages, next, signal.message))
           return
         }
 
