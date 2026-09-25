@@ -1,4 +1,5 @@
-import { pause as pauseGoal, resume as resumeGoal } from "../model/goal"
+import { GoalError, pause as pauseGoal, resume as resumeGoal } from "../model/goal"
+import { setBudget } from "../model/limits"
 import type { Goal } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
@@ -25,6 +26,21 @@ export function parseGoalCommand(text: string): ParsedGoalCommand {
   return { kind: "objective", objective: trimmed }
 }
 
+export type BudgetArg =
+  | { readonly kind: "usage" }
+  | { readonly kind: "clear" }
+  | { readonly kind: "set"; readonly budget: number }
+  | { readonly kind: "invalid"; readonly value: string }
+
+/** `/goal-budget` 参数：空 → 用法；none/off/0 → 清空；其余必须为正整数。 */
+export function parseBudgetArg(text: string): BudgetArg {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return { kind: "usage" }
+  if (/^(none|off|0)$/i.test(trimmed)) return { kind: "clear" }
+  if (/^[1-9]\d*$/.test(trimmed)) return { kind: "set", budget: Number(trimmed) }
+  return { kind: "invalid", value: trimmed }
+}
+
 export interface CommandPort {
   /** 触发一次模型轮（转发目标文本）。走 synthetic，TUI 只显示 `description` 一行。 */
   readonly deliver: (input: { sessionID: string; text: string; description: string }) => Promise<void>
@@ -45,6 +61,8 @@ export interface GoalCommandHandlers {
   readonly pause: (sessionID: string) => Promise<void>
   readonly resume: (sessionID: string) => Promise<void>
   readonly clear: (sessionID: string) => Promise<void>
+  /** `${name}-budget`：零 token 地改/清空当前目标的预算。 */
+  readonly budget: (sessionID: string, text: string) => Promise<void>
 }
 
 /** 命令面的确定性入口：全部零 token、零歧义；只有 `/goal <目标>` 会转发给模型。 */
@@ -94,6 +112,40 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     return port.notify(sessionID, deps.messages["notice.cleared"])
   }
 
+  const budget = async (sessionID: string, text: string): Promise<void> => {
+    const parsed = parseBudgetArg(text)
+    if (parsed.kind === "usage") return port.notify(sessionID, deps.messages["notice.budgetUsage"])
+    if (parsed.kind === "invalid")
+      return port.notify(sessionID, format(deps.messages["notice.budgetInvalid"], { value: parsed.value }))
+    const existing = await deps.repo.load(sessionID)
+    if (!existing) return port.notify(sessionID, deps.messages["notice.noGoal"])
+    const desired = parsed.kind === "clear" ? undefined : parsed.budget
+    let goal: Goal
+    try {
+      goal = setBudget(existing, { budget: desired, maxTokenBudget: deps.options.maxGoalTokenBudget, now: deps.now() })
+    } catch (error) {
+      if (error instanceof GoalError && error.code === "budget-exceeds-max")
+        return port.notify(
+          sessionID,
+          format(deps.messages["notice.budgetExceedsMax"], {
+            budget: desired ?? 0,
+            max: deps.options.maxGoalTokenBudget ?? 0,
+          }),
+        )
+      if (error instanceof GoalError)
+        return port.notify(sessionID, format(deps.messages["notice.budgetInvalid"], { value: text.trim() }))
+      throw error
+    }
+    await deps.repo.save(sessionID, goal)
+    const status = statusLabel(deps.messages, goal.status)
+    return port.notify(
+      sessionID,
+      desired === undefined
+        ? format(deps.messages["notice.budgetCleared"], { status })
+        : format(deps.messages["notice.budgetSet"], { budget: desired, status }),
+    )
+  }
+
   return {
     goal: async (input) => {
       const parsed = parseGoalCommand(input.prompt.text)
@@ -108,6 +160,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     pause,
     resume,
     clear,
+    budget,
   }
 }
 

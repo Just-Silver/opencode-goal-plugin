@@ -111,6 +111,7 @@ describe("server", () => {
       "goal-pause",
       "goal-resume",
       "goal-clear",
+      "goal-budget",
       "goal-debug",
     ])
     expect(env.tools[0]?.name).toBe("goal")

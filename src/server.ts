@@ -95,6 +95,11 @@ export default {
         execute: async (input) => handlers.clear(input.sessionID),
       })
       editor.add({
+        name: `${name}-budget`,
+        description: messages["cmd.budget"],
+        execute: async (input) => handlers.budget(input.sessionID, input.prompt.text),
+      })
+      editor.add({
         name: options.debugCommandName,
         description: messages["cmd.debug"],
         execute: async (input) => {

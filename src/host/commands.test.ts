@@ -3,7 +3,7 @@ import { DEFAULT_OPTIONS } from "../config"
 import { messagesFor } from "../i18n"
 import { createGoal, pause } from "../model/goal"
 import { createRepository, type Repository, type StorageLike } from "../store/repository"
-import { createCommandHandlers, parseGoalCommand } from "./commands"
+import { createCommandHandlers, parseBudgetArg, parseGoalCommand } from "./commands"
 import type { GoalDeps } from "./deps"
 
 describe("parseGoalCommand", () => {
@@ -211,5 +211,74 @@ describe("createCommandHandlers", () => {
     expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
     expect(notices[0]).toContain("new work")
     expect(notices[0]).toContain("last error: limit")
+  })
+})
+
+describe("parseBudgetArg", () => {
+  test("empty means usage", () => {
+    expect(parseBudgetArg("")).toEqual({ kind: "usage" })
+    expect(parseBudgetArg("   ")).toEqual({ kind: "usage" })
+  })
+
+  test("none / off / 0 clear the budget (case-insensitive)", () => {
+    expect(parseBudgetArg("none")).toEqual({ kind: "clear" })
+    expect(parseBudgetArg("OFF")).toEqual({ kind: "clear" })
+    expect(parseBudgetArg("0")).toEqual({ kind: "clear" })
+  })
+
+  test("a positive integer sets it, anything else is invalid", () => {
+    expect(parseBudgetArg("500")).toEqual({ kind: "set", budget: 500 })
+    for (const raw of ["-5", "1.5", "5x", "500 000"])
+      expect(parseBudgetArg(raw)).toEqual({ kind: "invalid", value: raw })
+  })
+})
+
+describe("budget command", () => {
+  test("usage / invalid / no goal are deterministic and touch no model turn", async () => {
+    const { handlers, notices, prompts } = makeHandler()
+    await handlers.budget("ses_1", "")
+    expect(notices.at(-1)).toContain("Usage")
+
+    await handlers.budget("ses_1", "-1")
+    expect(notices.at(-1)).toContain("Invalid budget")
+
+    await handlers.budget("ses_1", "500")
+    expect(notices.at(-1)).toContain("No goal")
+    expect(prompts).toHaveLength(0)
+  })
+
+  test("sets and clears the budget, reporting the resulting status", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 10 }))
+
+    await handlers.budget("ses_1", "500")
+    expect((await deps.repo.load("ses_1"))?.tokenBudget).toBe(500)
+    expect(notices.at(-1)).toContain("Budget set to 500")
+    expect(notices.at(-1)).toContain("active")
+
+    await handlers.budget("ses_1", "none")
+    const cleared = await deps.repo.load("ses_1")
+    expect(cleared && "tokenBudget" in cleared).toBe(false)
+    expect(notices.at(-1)).toContain("Budget removed")
+  })
+
+  test("raising the budget resumes a budget-limited goal, and the receipt says so", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 10 }),
+      status: "budget-limited" as const,
+      tokensUsed: 100,
+    })
+    await handlers.budget("ses_1", "500")
+    expect((await deps.repo.load("ses_1"))?.status).toBe("active")
+    expect(notices.at(-1)).toContain("active")
+  })
+
+  test("rejects a budget above maxGoalTokenBudget with a dedicated notice", async () => {
+    const deps = { ...makeDeps(), options: { ...DEFAULT_OPTIONS, maxGoalTokenBudget: 100 } }
+    const { handlers, notices } = runner(deps)
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    await handlers.budget("ses_1", "101")
+    expect(notices.at(-1)).toContain("max_goal_token_budget 100")
   })
 })
