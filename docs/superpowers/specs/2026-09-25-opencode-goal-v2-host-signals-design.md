@@ -162,7 +162,7 @@ export function applyHostSignal(goal: Goal, now: number, signal: HostSignal): Go
 ### 4.5 展示
 
 - `model/tool-result.ts` 的 `GoalView` 增加可选 `lastError`；`buildToolResult` 透传。
-- `host/commands.ts` 的 `statusLine`：当 `lastError` 存在时追加 ` — last error: <message>`。
+- `host/commands.ts` 的 `statusLine`：当 `lastError` 存在时追加 `; last error: <message || type>`。
 - `server.ts` 的 `${name}-resume` 命令描述补 `usage-limited`（由「paused, blocked, or budget-limited」改为「paused, blocked, budget-limited, or usage-limited」）。
 
 ### 4.6 resume
@@ -235,3 +235,4 @@ export function applyHostSignal(goal: Goal, now: number, signal: HostSignal): Go
 
 - **2026-09-25（初稿）**：经 docs / 宿主源码 / GitHub 三侧核实，确定 V2 唯一可靠终态错误信号为 `session.execution.failed.data.error`；映射范围定为 `provider.quota → usage-limited` + `{auth, content-filter, invalid-request} → blocked`；排除 `no-route`（热重载陷阱）等；不加配置、不做自动恢复、不干预重试。
 - **2026-09-25（独立子代理审阅，Approved）**：并入 4 条改进：① §1 措辞更正（`failed` 路径并非绝对不改状态——空转计数仍可独立置 blocked）；② §4.4 点明「判翻转」的实现（前后各 load 一次、按最终 status 生成回执）；③ §7 补「已在 usage-limited 再来信号 → 不变、无回执」用例；④ 回执文案按最终 status（含 `applyBudget` 升级）。
+- **2026-09-25（实现回填）**：§4.5 措辞与实现对齐为 `; last error: <message || type>`。
