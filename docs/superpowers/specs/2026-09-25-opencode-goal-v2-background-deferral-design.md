@@ -225,5 +225,6 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
   2. §4.3 文本兜底改为「只要未按 metadata 命中就尝试」，不再要求 `source` 缺失；
   3. §4.4 `session.deleted` 顺带移除「以该 sessionID 为 key」的所有 pending 项（子会话先删的场景）；
   4. §4.6 确保仅剩 pendingBackground 的会话也进入 `diagnostics()`；§7 补乱序与子会话删除两条单测。
+  > 注：本条第 1 点（「只要能解析出 id 就记入 `recentlyCompleted`」）已被下一条「最终整支分支审查修正」取代——现行实现为「仅当完成先于起信号才落护栏」。
 - **2026-09-25（最终整支分支审查修正）**：`recentlyCompleted` 原「无论是否命中都记」会误挡「30 秒内继续既有后台 subagent」（子会话 id 复用）→ 抢跑。已改为**仅当完成先于起信号（key 不在 pending）时才落护栏**；`session.deleted` 改为**强制**落护栏（防删除后迟到起信号）。
 - **2026-09-25（第三轮独立审阅）**：抓出 `recentlyCompleted` 写入时机与护栏目标**自相矛盾**（原写「命中移除时才记」，而护栏要防的恰是「key 尚未入 pending、移除为 no-op」→ 记录不会留下 → 护栏失效）。已修：**只要能解析出 id 就记入 `recentlyCompleted`，与是否成功移除解耦**；并定 TTL = 30 秒、补「同 key 不会复用」结论、文本兜底限定最外层标签。
