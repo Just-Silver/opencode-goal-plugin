@@ -82,7 +82,7 @@ export default {
       })
       editor.add({
         name: `${name}-resume`,
-        description: "Resume a paused, blocked, or budget-limited goal.",
+        description: "Resume a paused, blocked, budget-limited, or usage-limited goal.",
         execute: async (input) => handlers.resume(input.sessionID),
       })
       editor.add({

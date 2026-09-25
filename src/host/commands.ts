@@ -106,5 +106,6 @@ function statusLine(goal: Goal): string {
   // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）。
   const usage = goal.usage && usageIsComplete(goal) ? goal.usage : undefined
   const detail = usage ? ` (cacheRead ${usage.cacheRead} · new work ${newWorkOf(usage)})` : ""
-  return `Goal (${goal.status}) — tokens ${goal.tokensUsed} / ${budget}${detail}; ${goal.timeUsedSeconds}s. Objective: ${goal.objective}`
+  const lastError = goal.lastError ? `; last error: ${goal.lastError.message || goal.lastError.type}` : ""
+  return `Goal (${goal.status}) — tokens ${goal.tokensUsed} / ${budget}${detail}; ${goal.timeUsedSeconds}s${lastError}. Objective: ${goal.objective}`
 }

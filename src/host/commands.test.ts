@@ -96,6 +96,18 @@ describe("createCommandHandlers", () => {
     expect(notices[0]).toContain("No goal")
   })
 
+  test("status line surfaces the last host error", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      status: "usage-limited" as const,
+      lastError: { type: "provider.quota", message: "weekly usage limit reached", at: 1 },
+    })
+    await handlers.status("ses_1")
+    expect(notices[0]).toContain("usage-limited")
+    expect(notices[0]).toContain("weekly usage limit reached")
+  })
+
   test("pause and resume are handled deterministically", async () => {
     const { deps, handlers, notices } = makeHandler()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
