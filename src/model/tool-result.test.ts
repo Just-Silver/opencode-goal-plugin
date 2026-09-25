@@ -52,4 +52,18 @@ describe("buildToolResult", () => {
     expect(result.goal.objective).toHaveLength(5000)
     expect(result.blockerStreak).toBe(2)
   })
+
+  test("reports lastError as null when absent", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 0 })
+    expect(buildToolResult(goal).goal.lastError).toBeNull()
+  })
+
+  test("exposes lastError when present", () => {
+    const goal = {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      status: "usage-limited" as const,
+      lastError: { type: "provider.quota", message: "weekly usage limit", at: 7 },
+    }
+    expect(buildToolResult(goal).goal.lastError).toEqual({ type: "provider.quota", message: "weekly usage limit", at: 7 })
+  })
 })

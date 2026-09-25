@@ -39,7 +39,7 @@ export function createGoal(input: CreateInput): Goal {
   }
 }
 
-/** 改写状态并刷新 updatedAt；resume 时清空 blocker 审计（“恢复即新一轮审计”）。 */
+/** 改写状态并刷新 updatedAt；resume 时清空 blocker 审计与 lastError（“恢复即新一轮”）。 */
 function next(goal: Goal, status: GoalStatus, now: number, patch: Partial<Goal> = {}): Goal {
   return { ...goal, ...patch, status, updatedAt: now }
 }

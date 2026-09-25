@@ -31,13 +31,18 @@ export function decodeGoal(value: unknown): Goal | undefined {
   if (typeof record.tokensUsed !== "number" || typeof record.timeUsedSeconds !== "number") return undefined
   if (typeof record.blockerStreak !== "number" || typeof record.emptyStreak !== "number") return undefined
   if (typeof record.createdAt !== "number" || typeof record.updatedAt !== "number") return undefined
-  // `usage` 是 0.1.1 起新增的可选字段：形状不对就丢弃该字段、保留目标（不因为一个分项把整条记录判死）。
-  if (record.usage !== undefined && !isUsage(record.usage)) {
-    const copy: Record<string, unknown> = { ...record }
+  // 可选展示字段：形状不对就丢弃该字段、保留目标（不因为一个字段把整条记录判死）。
+  const copy: Record<string, unknown> = { ...record }
+  let dirty = false
+  if (copy.usage !== undefined && !isUsage(copy.usage)) {
     delete copy.usage
-    return copy as unknown as Goal
+    dirty = true
   }
-  return value as Goal
+  if (copy.lastError !== undefined && !isLastError(copy.lastError)) {
+    delete copy.lastError
+    dirty = true
+  }
+  return dirty ? (copy as unknown as Goal) : (value as Goal)
 }
 
 function isUsage(value: unknown): value is GoalUsage {
@@ -50,6 +55,12 @@ function isUsage(value: unknown): value is GoalUsage {
     typeof u.cacheRead === "number" &&
     typeof u.cacheWrite === "number"
   )
+}
+
+function isLastError(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false
+  const e = value as Record<string, unknown>
+  return typeof e.type === "string" && typeof e.message === "string" && typeof e.at === "number"
 }
 
 export function createRepository(storage: StorageLike): Repository {

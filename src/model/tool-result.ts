@@ -1,4 +1,4 @@
-import type { Goal, GoalStatus, GoalUsage } from "./types"
+import type { Goal, GoalLastError, GoalStatus, GoalUsage } from "./types"
 import { newWorkOf, usageIsComplete } from "./usage"
 
 export interface GoalView {
@@ -12,6 +12,7 @@ export interface GoalView {
   readonly timeUsedSeconds: number
   readonly blockerKey: string | null
   readonly blockerText: string | null
+  readonly lastError: GoalLastError | null
   readonly blockerStreak: number
   readonly emptyStreak: number
   readonly createdAt: number
@@ -49,6 +50,7 @@ export function buildToolResult(goal: Goal): ToolResult {
       timeUsedSeconds: goal.timeUsedSeconds,
       blockerKey: goal.blockerKey ?? null,
       blockerText: goal.blockerText ?? null,
+      lastError: goal.lastError ?? null,
       blockerStreak: goal.blockerStreak,
       emptyStreak: goal.emptyStreak,
       createdAt: goal.createdAt,

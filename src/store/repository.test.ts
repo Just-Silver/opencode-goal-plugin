@@ -109,4 +109,27 @@ describe("repository", () => {
     expect(decoded?.usage).toBeUndefined()
     expect(decoded?.tokensUsed).toBe(0)
   })
+
+  test("decodeGoal keeps an optional lastError", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 1 })
+    const decoded = decodeGoal({ ...goal, lastError: { type: "provider.quota", message: "q", at: 9 } })
+    expect(decoded?.lastError).toEqual({ type: "provider.quota", message: "q", at: 9 })
+  })
+
+  test("decodeGoal drops a malformed lastError but keeps the goal", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 1 })
+    const decoded = decodeGoal({ ...goal, lastError: { type: 5 } })
+    expect(decoded).toBeDefined()
+    expect(decoded?.lastError).toBeUndefined()
+    expect(decoded?.goalId).toBe("g1")
+  })
+
+  test("decodeGoal drops both malformed optional fields at once", () => {
+    const goal = createGoal({ goalId: "g1", objective: "o", now: 1 })
+    const decoded = decodeGoal({ ...goal, usage: { input: "nope" }, lastError: { at: "nope" } })
+    expect(decoded).toBeDefined()
+    expect(decoded?.usage).toBeUndefined()
+    expect(decoded?.lastError).toBeUndefined()
+    expect(decoded?.goalId).toBe("g1")
+  })
 })
