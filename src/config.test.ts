@@ -34,4 +34,17 @@ describe("resolveOptions", () => {
   test("rejects a non-boolean debug", () => {
     expect(() => resolveOptions({ debug: "yes" })).toThrow(/debug/)
   })
+
+  test("language is optional and normalized", () => {
+    expect(resolveOptions({}).language).toBeUndefined()
+    expect(resolveOptions({ language: "zh" }).language).toBe("zh-CN")
+    expect(resolveOptions({ language: "zh_CN" }).language).toBe("zh-CN")
+    expect(resolveOptions({ language: "EN" }).language).toBe("en")
+    expect("language" in DEFAULT_OPTIONS).toBe(false)
+  })
+
+  test("rejects a malformed language", () => {
+    expect(() => resolveOptions({ language: "fr" })).toThrow(/language/)
+    expect(() => resolveOptions({ language: 1 })).toThrow(/language/)
+  })
 })

@@ -1,3 +1,5 @@
+import { toLanguage, type Language } from "./i18n/language"
+
 export interface Options {
   readonly tokenBudget?: number
   readonly maxGoalTokenBudget?: number
@@ -10,6 +12,8 @@ export interface Options {
   readonly debugCommandName: string
   /** true 时额外注册 `goal_debug` 只读调试工具（默认开，便于 agent 自主诊断；设 false 可让工具表保持干净）。 */
   readonly debug: boolean
+  /** 面向用户文案的语言；缺省跟随系统 locale。 */
+  readonly language?: Language
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -36,7 +40,16 @@ export function resolveOptions(raw: Record<string, unknown>): Options {
     commandName: nonEmptyString(raw.command_name, "command_name") ?? DEFAULT_OPTIONS.commandName,
     debugCommandName: nonEmptyString(raw.debug_command_name, "debug_command_name") ?? DEFAULT_OPTIONS.debugCommandName,
     debug: booleanValue(raw.debug, "debug") ?? DEFAULT_OPTIONS.debug,
+    language: languageValue(raw.language),
   }
+}
+
+function languageValue(value: unknown): Language | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "string") throw new Error(`opencode-goal: option "language" must be "zh-CN" or "en"`)
+  const language = toLanguage(value)
+  if (language === undefined) throw new Error(`opencode-goal: option "language" must be "zh-CN" or "en"`)
+  return language
 }
 
 function booleanValue(value: unknown, key: string): boolean | undefined {
