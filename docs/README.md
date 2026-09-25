@@ -31,7 +31,9 @@
 
 - `superpowers/specs/2026-09-24-opencode-goal-design.md` —— **v1 设计**（已实现）
 - `superpowers/specs/2026-09-25-opencode-goal-v2-*-design.md` —— **V2 子项目**：后台 deferral / 宿主信号 / i18n（均已实现，v0.2.0）
+- `superpowers/specs/2026-09-26-opencode-goal-v2-continuation-count-and-budget-design.md` —— **V2 子项目 6**：自动续跑计数 + 预算随时可调（本分支已实现，待发布 0.3.0）
 - `superpowers/plans/2026-09-25-*.md` —— 对应实现计划（逐任务 TDD）
+- `superpowers/plans/2026-09-26-opencode-goal-v2-continuation-count-and-budget.md` —— 子项目 6 的实现计划
 
 ## 目录结构
 

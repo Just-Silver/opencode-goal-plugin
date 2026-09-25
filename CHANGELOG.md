@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **自动续跑计数**：目标累计记录自动续跑次数，展示在 `/goal-status`、续跑回执（`目标自动续跑 #N`）、`goal(op="get")` 返回与 `/goal-debug state`。
+- **预算随时可改**：新增命令 `/goal-budget <正整数|none>`（`none` 取消预算，不限）与工具 `goal(op="budget", token_budget=…)`（`0` = 无预算）；把预算改到够用会把 `budget-limited` 的目标自动恢复为进行中，仍受 `max_goal_token_budget` 约束（`none` 除外）。
+
 ## [0.2.1] - 2026-09-25
 
 ### Changed

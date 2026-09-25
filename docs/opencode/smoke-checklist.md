@@ -105,3 +105,14 @@
   - `/goal-debug env` → `opencode-goal 调试 env\n实例 location：…\n会话：…\n会话目录：…\n是否属于本实例：是\n配置：{…}`（全中文标签）✓
 - 结论：语言探测（`Intl` → `zh-CN`）与 `messages` 接线在真机生效。
 - `language` 显式覆盖未单独真机测（单测已覆盖 `resolveOptions` 归一与 `resolveLanguage` 优先级）。
+
+## 10. 自动续跑计数 + 预算随时可调真机验收（待填，V2 子项目 6）
+
+> 待分支实现完成后按 spec §6 的真机清单执行，结果补到本节。
+
+- `/goal-status` 显示「自动续跑 N 次」。
+- 跨轮续跑 notice 依次 `目标自动续跑 #1` / `#2`…
+- `token_budget=1` → `budget-limited` → `/goal-budget 500000`：状态回「进行中」，回执「预算已设为 500000；目标当前为「进行中」。」；再发一条消息后继续续跑。
+- `/goal-budget none`：回执「已取消预算（不限）；…」；`/goal-status` 显示「无预算」。
+- 对话式「预算加到 50 万」：模型调用 `goal(op="budget", token_budget=500000)`。
+- 回归：`smoke-api.mjs --scenario budget` PASS；`--scenario continuation` 的 `cont <= succeeded` 仍成立。
