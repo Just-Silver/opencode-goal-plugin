@@ -359,6 +359,31 @@ const SCENARIOS = {
     },
   },
 
+  // 后台子代理：运行期间不自动续跑，完成后恢复（依赖模型配合使用 subagent background:true）
+  "background-subagent": {
+    title: "后台子代理：运行期间不自动续跑，完成后恢复",
+    run: async (ctx) => {
+      await ctx.clearGoal()
+      const m = ctx.events.mark()
+      await sendGoal(
+        ctx.sid,
+        '调用 subagent 工具（参数 background: true；agent 从你可用的子代理里选一个；description 写 "冒烟后台子代理"；prompt 写 "执行 shell 命令：sleep 30，然后回复 done"）。后台启动后立刻结束本轮、不要等待、不要轮询。目标：等该子代理完成后回复 完成。',
+      )
+      const active = await ctx.waitStatus("active", 90000)
+      check(active, "目标应进入 active")
+      await sleep(15000)
+      const during = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      ctx.log(`子代理运行期间 auto-continue 回执=${during}`)
+      check(during === 0, `后台子代理运行期间不应自动续跑，实际 ${during}`)
+      const done = await ctx.waitStatus(["complete", "blocked", "budget-limited"], 240000)
+      check(done, "应到达终态")
+      const after = ctx.receipts(m).filter((d) => /Goal auto-continue/i.test(d)).length
+      ctx.log(`完成后 auto-continue 回执=${after}（唤醒轮直接收尾时为 0，属正常）`)
+      await control(ctx.sid, "clear")
+      await sleep(1500)
+    },
+  },
+
   // create 冲突
   conflict: {
     title: "create 冲突：已有未关闭目标时拒绝 create",

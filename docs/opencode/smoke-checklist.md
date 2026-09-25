@@ -74,7 +74,11 @@
 
 - `background` 场景 **PASS**（39.5s）：模型 `shell {background:true}` 起后台 `sleep 30`；**后台运行期间 auto-continue 回执 = 0**（defer 生效）；完成通知唤醒后目标收尾。
   - 注：该场景**不**硬断言「完成后必有 auto-continue」——模型可能在宿主唤醒轮里直接 `goal(complete)` 收尾（本次实测即如此），此时 0 条属正常。
+- `background-subagent` 场景 **PASS**（42.6s）：模型 `subagent {agent:"general", background:true}` 起后台子代理；**运行期间 auto-continue 回执 = 0**（defer 生效）；完成通知唤醒后收尾。验证了子代理会新建子会话、其自身 `execution.*` 事件不干扰父会话 deferral。
 - `continuation` 回归 **PASS**（15.3s）：`execution.succeeded=3`、auto-continue 回执 = 2 → `cont <= succeeded` 成立（代际护栏无回归）。
 - **真机 metadata 形状核对**（spec §3.2 要求，防「假形状遮真 bug」）：
-  - 起：`session.tool.success` 的 `data.metadata` = `{"status":"running","truncated":false,"shellID":"sh_0d7551627001SrTwPQEgLzT8y5"}` —— 与假定一致。
-  - 止：完成通知为 synthetic，文本 `<shell id="sh_…" state="completed" command="…">…</shell>` —— 与文本兜底正则（`^\s*<shell\b[^>]*\sid="…"`）一致。
+  - shell 起：`session.tool.success` 的 `data.metadata` = `{"status":"running","truncated":false,"shellID":"sh_…"}` ✓
+  - shell 止：`{"source":"shell","shellID":"sh_…","jobID":"sh_…","state":"completed","truncated":false,"exit":0}`；文本 `<shell id="sh_…" state="completed" command="…">…</shell>` ✓
+  - subagent 起：`{"sessionID":"ses_…","status":"running","truncated":false}` ✓
+  - subagent 止：`{"source":"subagent","childID":"ses_…","agent":"General","state":"completed"}`；文本 `<subagent sessionID="ses_…" state="completed" …>…</subagent>` ✓
+  - **key 对齐**：subagent 起 `sessionID` 与止 `childID` 同值；shell `jobID === shellID` → metadata 主路径与文本兜底的 key 均一致。
