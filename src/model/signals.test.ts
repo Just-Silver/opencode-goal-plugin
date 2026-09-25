@@ -44,8 +44,13 @@ describe("hostSignal", () => {
     expect(hostSignal({ type: "" })).toBeUndefined()
   })
 
-  test("defaults a missing message to an empty string", () => {
+  test("defaults a missing or non-string message to an empty string", () => {
     expect(hostSignal({ type: "provider.quota" })).toEqual({ status: "usage-limited", type: "provider.quota", message: "" })
+    expect(hostSignal({ type: "provider.quota", message: 5 })).toEqual({
+      status: "usage-limited",
+      type: "provider.quota",
+      message: "",
+    })
   })
 })
 
@@ -66,6 +71,7 @@ describe("applyHostSignal", () => {
     expect(next.status).toBe("blocked")
     expect(next.lastError?.type).toBe("provider.auth")
     expect(next.blockerKey).toBe("k")
+    expect(next.blockerText).toBe("t")
     expect(next.blockerStreak).toBe(2)
   })
 
