@@ -1,3 +1,4 @@
+import { format, type Messages } from "../i18n/messages"
 import type { GoalDeps } from "./deps"
 import type { DebugEventRecord, DebugSnapshot } from "./events"
 
@@ -19,12 +20,12 @@ export const DEBUG_OPS = ["env", "events", "sessions", "state"] as const
  * **纯文本渲染、不解析 Markdown**（`###`、`| 表格 |` 会原样显示，很难看）。
  * 所以这里一律输出裸文本，不要用 Markdown 语法。
  */
-function usage(pluginId: string): string {
-  return `${pluginId} debug — 用法: env | events | sessions | state`
+function usage(messages: Messages, pluginId: string): string {
+  return format(messages["debug.usage"], { pluginId })
 }
 
-function block(header: string, rows: readonly string[]): string {
-  return [header, ...(rows.length === 0 ? ["(none)"] : rows)].join("\n")
+function block(header: string, rows: readonly string[], messages: Messages): string {
+  return [header, ...(rows.length === 0 ? [messages["debug.none"]] : rows)].join("\n")
 }
 
 function short(id: string, length = 16): string {
@@ -46,18 +47,28 @@ function clock(ms: number): string {
 }
 
 async function renderEnv(deps: GoalDeps, source: DebugSource, sessionID: string): Promise<string> {
+  const messages = deps.messages
   const directory = await deps.sessionDirectory(sessionID)
-  const verdict = directory === undefined ? "unknown" : directory === deps.locationDirectory ? "yes" : "no"
-  return block(`${source.pluginId} debug env`, [
-    `instance location: ${deps.locationDirectory}`,
-    `session: ${sessionID}`,
-    `session directory: ${directory ?? "(unknown)"}`,
-    `belongs to this instance: ${verdict}`,
-    `options: ${JSON.stringify(deps.options)}`,
-  ])
+  const verdict =
+    directory === undefined
+      ? messages["debug.unknown"]
+      : directory === deps.locationDirectory
+        ? messages["debug.yes"]
+        : messages["debug.no"]
+  return block(
+    format(messages["debug.env.header"], { pluginId: source.pluginId }),
+    [
+      format(messages["debug.env.instanceLocation"], { dir: deps.locationDirectory }),
+      format(messages["debug.env.session"], { id: sessionID }),
+      format(messages["debug.env.sessionDirectory"], { dir: directory ?? messages["debug.unknownValue"] }),
+      format(messages["debug.env.belongs"], { verdict }),
+      format(messages["debug.env.options"], { json: JSON.stringify(deps.options) }),
+    ],
+    messages,
+  )
 }
 
-function renderEvents(pluginId: string, events: readonly DebugEventRecord[]): string {
+function renderEvents(pluginId: string, messages: Messages, events: readonly DebugEventRecord[]): string {
   const rows = events.map((event) =>
     [
       clock(event.at),
@@ -67,31 +78,55 @@ function renderEvents(pluginId: string, events: readonly DebugEventRecord[]): st
       event.decision,
     ].join("  "),
   )
-  return block(`${pluginId} debug events (last ${events.length})`, rows)
+  return block(format(messages["debug.events.header"], { pluginId, n: events.length }), rows, messages)
 }
 
 async function renderSessions(deps: GoalDeps, pluginId: string): Promise<string> {
+  const messages = deps.messages
   const all = await deps.repo.listAll()
   const rows = all.map(({ sessionID, goal }) =>
     [short(sessionID), goal.status, clip(goal.objective, 60), clock(goal.updatedAt)].join("  "),
   )
-  return block(`${pluginId} debug sessions (${all.length})`, rows)
+  return block(format(messages["debug.sessions.header"], { pluginId, n: all.length }), rows, messages)
 }
 
-async function renderState(deps: GoalDeps, pluginId: string, sessionID: string, snapshot: DebugSnapshot): Promise<string> {
+async function renderState(
+  deps: GoalDeps,
+  pluginId: string,
+  sessionID: string,
+  snapshot: DebugSnapshot,
+): Promise<string> {
+  const messages = deps.messages
   const state = snapshot.sessions.find((item) => item.sessionID === sessionID)
   const goal = await deps.repo.load(sessionID)
   const cache = state?.sessionDirectory
-  return block(`${pluginId} debug state`, [
-    `session: ${sessionID}`,
-    `turn open: ${state === undefined ? "(no tracked state)" : state.turnOpen}`,
-    `agent: ${state?.agent ?? "unknown"}`,
-    `session directory cache: ${cache === undefined || cache === null ? "(none)" : cache}`,
-    `pending automatic: ${state === undefined ? "-" : state.pendingAutomatic}`,
-    `pending background: ${state === undefined ? "-" : state.pendingBackground}`,
-    `blocked this turn: ${state === undefined ? "-" : state.blockedThisTurn}`,
-    `goal: ${goal === undefined ? "(none)" : `${goal.status}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`}`,
-  ])
+  return block(
+    format(messages["debug.state.header"], { pluginId }),
+    [
+      format(messages["debug.state.session"], { id: sessionID }),
+      format(messages["debug.state.turnOpen"], {
+        value: state === undefined ? messages["debug.noTrackedState"] : String(state.turnOpen),
+      }),
+      format(messages["debug.state.agent"], { agent: state?.agent ?? messages["debug.unknown"] }),
+      format(messages["debug.state.directoryCache"], {
+        dir: cache === undefined || cache === null ? messages["debug.none"] : cache,
+      }),
+      format(messages["debug.state.pendingAutomatic"], {
+        value: state === undefined ? "-" : String(state.pendingAutomatic),
+      }),
+      format(messages["debug.state.pendingBackground"], { value: state === undefined ? "-" : state.pendingBackground }),
+      format(messages["debug.state.blockedThisTurn"], {
+        value: state === undefined ? "-" : String(state.blockedThisTurn),
+      }),
+      format(messages["debug.state.goal"], {
+        goal:
+          goal === undefined
+            ? messages["debug.none"]
+            : `${goal.status}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`,
+      }),
+    ],
+    messages,
+  )
 }
 
 /**
@@ -101,21 +136,22 @@ async function renderState(deps: GoalDeps, pluginId: string, sessionID: string, 
 export function createDebug(deps: GoalDeps, source: DebugSource): Debug {
   return {
     async render(rawOp, sessionID) {
+      const messages = deps.messages
       const op = rawOp.trim().toLowerCase()
       switch (op) {
         case "":
         case "help":
-          return usage(source.pluginId)
+          return usage(messages, source.pluginId)
         case "env":
           return renderEnv(deps, source, sessionID)
         case "events":
-          return renderEvents(source.pluginId, source.snapshot().events)
+          return renderEvents(source.pluginId, messages, source.snapshot().events)
         case "sessions":
           return renderSessions(deps, source.pluginId)
         case "state":
           return renderState(deps, source.pluginId, sessionID, source.snapshot())
         default:
-          return `Unknown debug subcommand: ${op}\n${usage(source.pluginId)}`
+          return format(messages["debug.unknownSubcommand"], { op, usage: usage(messages, source.pluginId) })
       }
     },
   }

@@ -134,4 +134,13 @@ describe("createDebug", () => {
     const text = await debug.render("state", "ses_1")
     expect(text).toContain("pending background: 1")
   })
+
+  test("output follows the injected language", async () => {
+    const deps = { ...makeDeps(), messages: messagesFor("zh-CN") }
+    const { debug } = makeDebug(deps)
+    const text = await debug.render("env", "ses_1")
+    expect(text).toContain("是否属于本实例：是")
+    expect(text).toContain("会话：ses_1")
+    expect(text).not.toMatch(/\{[a-zA-Z]+\}/)
+  })
 })
