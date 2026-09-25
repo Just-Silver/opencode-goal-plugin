@@ -40,17 +40,7 @@
 
 - [ ] **Step 1: 真机核对 metadata 形状（spec 要求，先于逻辑实现）**
 
-先把两条事件加进调试环（本步只加类型，不改逻辑），然后真机观察真实 metadata。在 `src/host/events.ts` 的 `TRACKED_TYPES` 里加入两行：
-
-```ts
-  "session.tool.called",
-  "session.tool.success",
-```
-并在 `"session.deleted",` 之后加：
-```ts
-  "session.deleted",
-  "session.inbox.enqueued",
-```
+先把两条事件加进调试环（本步只加类型，不改逻辑），然后真机观察真实 metadata。在 `src/host/events.ts` 的 `TRACKED_TYPES` 里，于**既有的** `"session.tool.called",` 之后加入一行 `"session.tool.success",`；于既有的 `"session.deleted",` 之后加入一行 `"session.inbox.enqueued",`（**不要重复插入既有行**）。
 
 真机命令（在专门冒烟会话上；会消耗模型额度）：
 
@@ -127,7 +117,11 @@ const toolSuccess = (sessionID: string, metadata: Record<string, unknown>) => ({
     await router.handle(executionSucceeded("ses_1"))
     expect(prompts).toEqual(["ses_1"])
   })
+```
 
+> 注：「前台 subagent 不计入」是一条**回归护栏**：未实现 pending 逻辑时它也已通过（`prompts` 本就为 `["ses_1"]`），实现后仍须通过。它用于防止把前台结果误计入 pending，**不是**红-绿测试。
+
+```ts
   test("diagnostics reports the pending background count", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
@@ -204,6 +198,8 @@ export interface DebugSessionState {
           // 后台任务在跑 → 本轮不续跑；宿主完成通知会唤醒会话（spec §4.5）。
           if ((pendingBackground.get(sessionID)?.size ?? 0) > 0) return
 ```
+
+> §4.5 的「在 debug 记为 defer」以 Task 4 的 `pending background` 计数作为可观测证据（defer 发生时该计数 > 0）；不单独新增 defer 标记。
 
 4f. `diagnostics()` 里把 pending 会话纳入 id 集合，并在每个会话上输出计数：
 
@@ -404,6 +400,8 @@ Expected: FAIL —— 前两个测试的 `prompts` 为空（止信号未实现�
     return undefined
   }
 ```
+
+> 已知边界：真实 shell 通知文本的 `id` 取 `jobID ?? shellID`（宿主 `shell/result.ts`），pending key 用 `shellID`。后台 shell 路径下 `jobs.start({ id: info.id })` 使 `jobID === shellID`，故一致；仅当 metadata 缺失**且** `jobID !== shellID` 时文本兜底可能落空（极低概率）。metadata 是主路径。
 
 在 `switch` 的 `session.tool.success` 分支之后加：
 
@@ -704,7 +702,7 @@ git commit -m "test(smoke): 新增 background 场景（后台任务期间不续�
 
 - [ ] **Step 2: 更新 CHANGELOG**
 
-在 `CHANGELOG.md` 的 `## [Unreleased]` 之后加：
+把 `CHANGELOG.md` 里**空的** `## [Unreleased]` 一节替换为：
 
 ```markdown
 ## [Unreleased]
@@ -740,7 +738,7 @@ git commit -m "docs: 回填后台 deferral（CHANGELOG / 冒烟清单 / 移出�
 
 ## 自审记录
 
-- **spec 覆盖**：§3.2 起信号 → Task 1；止信号 → Task 2；§3.3 安全底座（不超时放行）→ Global Constraints；§4.1 内存 pending → Task 1；§4.2 起 + 乱序护栏 → Task 1/2；§4.3 止 + 文本兜底 + 不 clear-all → Task 2；§4.4 清理（deleted/interrupted）→ Task 3；§4.5 门控 → Task 1；§4.6 debug → Task 4；§7 测试 → Task 1-4；§7 冒烟 → Task 5；文档 → Task 6。
+- **spec 覆盖**：§3.2 起信号 → Task 1；止信号 → Task 2；§3.3 安全底座（不超时放行）→ Global Constraints；§4.1 内存 pending → Task 1；§4.2 起 + 乱序护栏 → Task 1/2；§4.3 止 + 文本兜底 + 不 clear-all → Task 2；§4.4 清理（deleted/interrupted）→ Task 3；§4.5 门控（defer 以 `pending background` 计数为可观测证据）→ Task 1/4；§4.6 debug → Task 4；§7 测试 → Task 1-4；§7 冒烟 → Task 5；文档 → Task 6。
 - **类型一致性**：`pendingBackground` / `recentlyCompleted` / `addPendingBackground` / `dropPendingKey` / `completeBackground` / `completionKeyFromMetadata` / `completionKeyFromText` / `RECENTLY_COMPLETED_TTL_MS` 全计划统一；`DebugSessionState.pendingBackground: number` 在 Task 1 定义、Task 4 消费。
 - **占位符**：无 TODO/TBD；每个代码步骤含完整代码。
 - **已知模型依赖**：Task 5 冒烟与「空转」场景同属模型依赖项，真机可能需换确定性模型。
