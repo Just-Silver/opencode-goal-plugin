@@ -899,6 +899,21 @@ describe("createEventRouter", () => {
     expect(notices[0]).toBe("Goal marked usage-limited. Use /goal-resume after the limit resets.")
   })
 
+  test("a budget upgrade after a host signal notifies with the final budget-limited status", async () => {
+    const deps = makeDeps()
+    // 未开轮 + 已超预算的 active 目标：信号落 usage-limited 后由 applyBudget 升级为 budget-limited
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }),
+      tokensUsed: 100,
+    })
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "quota" }))
+    expect((await deps.repo.load("ses_1"))?.status).toBe("budget-limited")
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain("budget-limited")
+  })
+
   test("an auth failure marks the goal blocked and notifies", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
