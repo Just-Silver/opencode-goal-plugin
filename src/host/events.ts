@@ -177,9 +177,9 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
   /** 文本兜底：只认通知**最外层**标签，避免正文里的同名标签误伤（spec §4.3）。 */
   const completionKeyFromText = (text: unknown): string | undefined => {
     if (typeof text !== "string") return undefined
-    const shell = /^\s*<shell\b[^>]*\bid="([^"]+)"/.exec(text)
+    const shell = /^\s*<shell\b[^>]*\sid="([^"]+)"/.exec(text)
     if (shell) return shell[1]
-    const subagent = /^\s*<subagent\b[^>]*\bsessionID="([^"]+)"/.exec(text)
+    const subagent = /^\s*<subagent\b[^>]*\ssessionID="([^"]+)"/.exec(text)
     if (subagent) return subagent[1]
     return undefined
   }
@@ -359,6 +359,8 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
 
         case "session.execution.interrupted": {
           // spec §8：中断（Esc / 关闭 / 超时）→ paused；丢弃未完成轮的残留状态，恢复后默认不自动续。
+          // 注意：**不**清 pendingBackground —— 后台 job 独立于 drain，中断取消不到后台任务，
+          // 其完成通知仍会到达并清 pending（spec §4.4）。
           turnOpen.delete(sessionID)
           pendingAutomatic.delete(sessionID)
           blockedThisTurn.delete(sessionID)
@@ -384,6 +386,9 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           turnOpen.delete(sessionID)
           turnUsage.delete(sessionID)
           sessionLocations.delete(sessionID)
+          // 后台 subagent 的子会话被删 → 从所有会话 pending 移除该 key；并清本会话自身 pending（spec §4.4）。
+          dropPendingKey(sessionID)
+          pendingBackground.delete(sessionID)
           return
         }
       }

@@ -692,4 +692,98 @@ describe("createEventRouter", () => {
     await router.handle(executionSucceeded("ses_1"))
     expect(prompts).toEqual(["ses_1"])
   })
+
+  test("continuation resumes only after every background task completes", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_1" }))
+    await router.handle(toolSuccess("ses_1", { status: "running", sessionID: "ses_child" }))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+    // 移出一个（metadata 主路径命中）→ 仍不续跑
+    await router.handle(inboxEnqueued("ses_1", { source: "shell", shellID: "sh_1" }))
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+    // 全部移出 → 续跑
+    await router.handle(inboxEnqueued("ses_1", { source: "subagent", childID: "ses_child" }))
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
+  })
+
+  test("deleting a background child session drops the parent's pending", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", sessionID: "ses_child" }))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+    // 子会话被删 → 父会话里以该 id 为 key 的 pending 被移除
+    await router.handle({ type: "session.deleted", data: { sessionID: "ses_child" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
+  })
+
+  test("an interruption keeps the pending background tasks", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_1" }))
+    await router.handle({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
+    // 中断后目标转 paused；用户 resume 时后台任务仍在跑 → 仍应 defer
+    const paused = (await deps.repo.load("ses_1"))!
+    await deps.repo.save("ses_1", { ...paused, status: "active" })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+  })
+
+  test("the ordering guard expires after its TTL", async () => {
+    let now = 1000
+    const deps = { ...makeDeps(), now: () => now }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    // 完成通知先到（key 记入 recentlyCompleted）
+    await router.handle(inboxEnqueued("ses_1", { source: "shell", shellID: "sh_x" }))
+    // 时间推进超过 TTL（30s）→ 护栏失效，起信号重新入 pending
+    now = 1000 + 31_000
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_x" }))
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+  })
 })
