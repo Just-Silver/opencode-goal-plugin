@@ -74,6 +74,17 @@ describe("transitions", () => {
     expect(resume(limited, 6000).status).toBe("active")
   })
 
+  test("resumes from usage-limited and clears lastError", () => {
+    const limited = {
+      ...goal,
+      status: "usage-limited" as const,
+      lastError: { type: "provider.quota", message: "weekly usage limit", at: 1234 },
+    }
+    const resumed = resume(limited, 6000)
+    expect(resumed.status).toBe("active")
+    expect(resumed.lastError).toBeUndefined()
+  })
+
   test("pause leaves a complete goal untouched", () => {
     const done = complete(goal, 2000)
     const paused = pause(done, 3000)

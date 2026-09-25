@@ -37,4 +37,15 @@ describe("applyBudget", () => {
     }
     expect(applyBudget(goal, 10)).toEqual(goal)
   })
+
+  test("upgrades a usage-limited goal to budget-limited when over budget (budget outranks usage limit)", () => {
+    const goal = {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }),
+      status: "usage-limited" as const,
+      tokensUsed: 100,
+    }
+    const limited = applyBudget(goal, 10)
+    expect(limited.status).toBe("budget-limited")
+    expect(limited.updatedAt).toBe(10)
+  })
 })

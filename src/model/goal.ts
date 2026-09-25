@@ -50,9 +50,20 @@ export function pause(goal: Goal, now: number): Goal {
 }
 
 export function resume(goal: Goal, now: number): Goal {
-  if (goal.status !== "paused" && goal.status !== "blocked" && goal.status !== "budget-limited")
+  if (
+    goal.status !== "paused" &&
+    goal.status !== "blocked" &&
+    goal.status !== "budget-limited" &&
+    goal.status !== "usage-limited"
+  )
     throw new GoalError("not-resumable", `not-resumable: cannot resume a ${goal.status} goal`)
-  return next(goal, "active", now, { blockerKey: undefined, blockerText: undefined, blockerStreak: 0, emptyStreak: 0 })
+  return next(goal, "active", now, {
+    blockerKey: undefined,
+    blockerText: undefined,
+    blockerStreak: 0,
+    emptyStreak: 0,
+    lastError: undefined,
+  })
 }
 
 export function complete(goal: Goal, now: number): Goal {
