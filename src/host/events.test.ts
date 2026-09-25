@@ -786,4 +786,28 @@ describe("createEventRouter", () => {
     await router.handle(executionSucceeded("ses_1"))
     expect(prompts).toEqual([])
   })
+
+  test("session.deleted clears the session's own pending", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_1" }))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+    // 会话被删 → 其自身 pending 被清（真实会话 id 不复用，这里仅重建记录观察）
+    await router.handle({ type: "session.deleted", data: { sessionID: "ses_1" } })
+    await deps.repo.save("ses_1", createGoal({ goalId: "g2", objective: "o", now: 0 }))
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
+  })
 })

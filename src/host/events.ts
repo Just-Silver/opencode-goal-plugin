@@ -386,8 +386,9 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           turnOpen.delete(sessionID)
           turnUsage.delete(sessionID)
           sessionLocations.delete(sessionID)
-          // 后台 subagent 的子会话被删 → 从所有会话 pending 移除该 key；并清本会话自身 pending（spec §4.4）。
-          dropPendingKey(sessionID)
+          // 后台 subagent 的子会话被删 → 从所有会话 pending 移除该 key，并记入护栏防「删除后迟到的起信号」再入 pending；
+          // 再清本会话自身 pending（spec §4.4）。
+          completeBackground(sessionID)
           pendingBackground.delete(sessionID)
           return
         }
