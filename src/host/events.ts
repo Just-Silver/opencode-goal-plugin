@@ -151,7 +151,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     pendingBackground.set(sessionID, keys)
   }
 
-  /** 只从 pending 移除 key（不记 `recentlyCompleted`）；用于会话删除等清理路径。 */
+  /** 只从 pending 移除 key（不记 `recentlyCompleted`）；供 `completeBackground` 复用。 */
   const dropPendingKey = (key: string): void => {
     for (const [sid, keys] of pendingBackground) {
       keys.delete(key)

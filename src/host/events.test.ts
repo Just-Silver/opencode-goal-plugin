@@ -810,4 +810,28 @@ describe("createEventRouter", () => {
     await router.handle(executionSucceeded("ses_1"))
     expect(prompts).toEqual(["ses_1"])
   })
+
+  test("a late start signal after a child session is deleted does not re-enter pending", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", sessionID: "ses_child" }))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+    // 子会话被删（记入乱序护栏）
+    await router.handle({ type: "session.deleted", data: { sessionID: "ses_child" } })
+    // 迟到的起信号：护栏应拦住，不再入 pending
+    await router.handle(toolSuccess("ses_1", { status: "running", sessionID: "ses_child" }))
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
+  })
 })
