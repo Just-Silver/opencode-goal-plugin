@@ -121,6 +121,7 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
   - 有 `shellID` → 加入该会话 pending（key = `shellID`）；
   - 有 `sessionID` → 加入（key = `sessionID`）。
 - `status` 为 `"completed"` 或缺失 → **不加入**（前台结果、以及前台 subagent 的 `completed` 都被排除）。
+- **乱序护栏**：加入前先查 `recentlyCompleted`（见 §4.3）：若 key 已在其中，**不**加入。防「瞬时任务」（如 `echo`）的完成通知**先于**起信号到达、随后又被加回 → 永久 defer。
 
 > **不采用** `session.created`（带 `parentID`）作为起信号：前台 subagent 同样触发 `session.created`，但**没有**完成通知（只有 background 路径才 `SubagentJob.notify`）→ 会把前台子会话永久留在 pending。工具结果 metadata 的 `status:"running"` 才是权威区分。
 
@@ -132,14 +133,15 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
 - 读 `metadata = data.item.payload.metadata`：
   - `metadata.source === "shell"` 且 `metadata.shellID` 存在 → 按该 key 移除。
   - `metadata.source === "subagent"` 且 `metadata.childID` 存在 → 按该 key 移除。
+- 命中移除时，把该 key 记入短时效集合 `recentlyCompleted`（供 §4.2 乱序护栏查；保留若干秒后过期）。
 - **key 未命中（含「无匹配」与「用户 `!命令` 的 shell 通知」）→ 忽略，不清理**（见下方「为什么不 clear-all」）。
-- metadata 无 `source`（形状漂移）→ 用**通知文本形状**兜底取 id（`<shell id="…" …>` / `<subagent sessionID="…" …>`），命中则按该 id 移除；仍取不到则忽略。
+- **文本兜底**：只要该条 synthetic **未能按 metadata 命中 pending**（无论有无 `source`）→ 再用通知文本形状取 id（`<shell id="…" …>` / `<subagent sessionID="…" …>`），命中则按该 id 移除；仍取不到则忽略。
 
 > **为什么不 clear-all**：用户 `!命令` 的完成通知同样带 `{source:"shell", shellID}`，其 `shellID` 从未进入 pending。若「key 未命中就清空该会话 pending」，会把同会话中真正在跑的后台任务一并抹掉 → 下次 `execution.succeeded` 提前续跑，**直接破坏本设计的核心目标**。故只做**按 key 移除**。
 
 ### 4.4 清理
 
-- `session.deleted`：删除该会话 pending。
+- `session.deleted`：删除该会话 pending；并**从所有会话的 pending 中移除 key == 该 sessionID 的项**（覆盖「后台 subagent 的子会话先被删除」的情况）。
 - `session.execution.interrupted`：**保留** pending，不清空。理由：后台 job 独立于 drain，`jobs.cancel(sessionID)` 按 job id 取消，**取消不到**后台 shell（id=`sh_…`）与后台 subagent（id=子会话）——即中断后后台任务**仍在跑**；其完成通知（`inbox.enqueued`，默认唤醒）仍会到达并清 pending。中断后目标转 `paused`，续跑本就不触发；若用户 `/goal resume` 时任务仍在跑，保留 pending 才能继续正确 defer。
 
 ### 4.5 门控
@@ -154,7 +156,7 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
 
 ### 4.6 debug
 
-- `/goal-debug state` 的会话快照（`DebugSessionState`）新增 `pendingBackground: number`（计数）。
+- `/goal-debug state` 的会话快照（`DebugSessionState`）新增 `pendingBackground: number`（计数）。实现时确保「仅剩 pendingBackground 的会话」也进入 `diagnostics()` 的会话集合（现有集合取自 `agents`/`sessionLocations`/`trackers`/`turnOpen`）。
 - `/goal-debug events` 的 `TRACKED_TYPES` 增加 `session.tool.success`、`session.inbox.enqueued`，便于真机核对 metadata 形状。
 
 ## 5. 与现有机制的关系
@@ -182,6 +184,8 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
 5. `session.deleted` → pending 清空；`execution.interrupted` → pending **保留**；
 6. 多任务：两个 pending，移出一个 → 仍**不**续跑；移出两个 → 续跑；
 7. 前台 subagent（`tool.success status:"completed"`）→ **不**加入 pending。
+8. **乱序**：完成通知（`inbox.enqueued`）**先于**起信号（`tool.success`）到达 → 起信号**不**入 pending（§4.2 护栏）。
+9. 子会话被删（`session.deleted`，sessionID = 子会话）→ 父会话中以该 id 为 key 的 pending 被移除（§4.4）。
 
 **冒烟**（`scripts/smoke-api.mjs` 新增 `background` 场景）：
 
@@ -215,3 +219,8 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
   2. **删除「key 未命中就清空 pending」**：用户 `!命令` 的 shell 通知会误触发清空 → 提前续跑。改为**只按 key 移除**。
   3. **删除 `session.created` 起信号兜底**：前台 subagent 同样触发且无完成通知 → 永久计入。改为只用 `tool.success status:"running"`。
   另修正 §3.1 措辞（「不可达」而非「不存在」）、§3.3 `resume:false` 说明、§4.4 中断时**保留** pending。
+- **2026-09-25（第二轮独立审阅，Approved）**：并入 4 条加固建议：
+  1. §4.2 加**乱序护栏**（`recentlyCompleted` 集合）——防瞬时任务的完成通知先于起信号到达导致永久 defer；
+  2. §4.3 文本兜底改为「只要未按 metadata 命中就尝试」，不再要求 `source` 缺失；
+  3. §4.4 `session.deleted` 顺带移除「以该 sessionID 为 key」的所有 pending 项（子会话先删的场景）；
+  4. §4.6 确保仅剩 pendingBackground 的会话也进入 `diagnostics()`；§7 补乱序与子会话删除两条单测。
