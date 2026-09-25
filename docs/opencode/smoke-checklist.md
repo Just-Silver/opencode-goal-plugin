@@ -95,3 +95,13 @@
   - 目标记录 = `blocked`、`lastError.type = "provider.auth"` ✓
 - **插件已加载**：`/goal-status` 正常返回回执（证明命令面在跑）。
 - **订阅语义**：未直接测「插件重启不重放」；旁证——插件既有的 `session.execution.failed` 结算与 `session.deleted` 清理长期依赖「实时流、不重放」，冒烟回归稳定。spec §8 已记录该残留假设（若确认重放，再加事件时刻/序号护栏）。
+
+## 9. i18n 真机验收（2026-09-25，V2 i18n）
+
+> 会话 `ses_f28ab48e8ffez9TtXXRvmxubIc`（location `C:\Users\13178`，系统 locale `zh-CN`）。插件复原后经 HTTP API 发命令、SSE `/api/event` 抓 `session.inbox.enqueued` 的 `description`。
+
+- **默认跟随系统 locale（未设 `language`）**：
+  - `/goal-status` → `本会话未设置目标。`（中文）✓
+  - `/goal-debug env` → `opencode-goal 调试 env\n实例 location：…\n会话：…\n会话目录：…\n是否属于本实例：是\n配置：{…}`（全中文标签）✓
+- 结论：语言探测（`Intl` → `zh-CN`）与 `messages` 接线在真机生效。
+- `language` 显式覆盖未单独真机测（单测已覆盖 `resolveOptions` 归一与 `resolveLanguage` 优先级）。
