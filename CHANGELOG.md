@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
 ### Added
 
 - **自动续跑计数**：目标累计记录自动续跑次数，展示在 `/goal-status`、续跑回执（`目标自动续跑 #N`）、`goal(op="get")` 返回与 `/goal-debug state`。
