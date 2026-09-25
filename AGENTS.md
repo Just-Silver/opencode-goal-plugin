@@ -10,6 +10,7 @@ OpenCode V2 的 goal 插件。单包、**零运行时依赖**、TS ESM，bun 直
 - `bunx tsc --noEmit` —— 类型检查。**`bun test` 不做类型检查，改完必须单独跑。**
 - `node scripts/changelog.mjs check` —— 版本一致性门禁（`package.json` == `CHANGELOG.md`；发版加 `--tag vX.Y.Z`）。
 - CI 门禁（`.github/workflows/ci.yml`）：`bun install --frozen-lockfile` → changelog check → tsc → test。
+- 改了 `package.json` 依赖后必须跑 `bun install` 更新 `bun.lock`（CI 用 `--frozen-lockfile`，锁文件不同步会直接失败）。
 
 ## 硬约束（容易踩）
 
