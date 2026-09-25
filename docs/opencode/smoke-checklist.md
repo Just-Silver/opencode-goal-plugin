@@ -45,3 +45,23 @@
 ## 5. 自动化场景一览（`scripts/smoke-api.mjs`）
 
 `commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty` / `compaction`。
+
+## 6. 验收结果（2026-09-25，V1 收尾）
+
+> 环境：opencode **v2.0.15**（`v2` 分支）、模型 `r4-coder/deepseek-v4.1-flash`（推理模型）。会话 `ses_f293a2cfeffetRUBDZBZFXH9Sy`。
+> 全量：`bun test` = **187 pass / 0 fail**；`bunx tsc --noEmit` = **0 错**。
+
+本次收尾**实际复跑**的场景：
+
+| 场景 | 结果 | 证据 |
+| --- | --- | --- |
+| `reconcile` | ✅ PASS | 直写孤儿 KV（`updatedAt` 超保护窗）→ `reload` → 孤儿被清、活记录保留 |
+| `compaction` | ✅ PASS | `session.compact` → 收 `session.compaction.ended`、摘要非空、目标仍 `active` |
+| `truncate` | ✅ PASS | objective **7997 字符**进 KV（模型未压缩原文） |
+| `empty` | ❌ FAIL（预期，模型依赖） | `emptyStreak=0`：推理模型每轮必有活动 → 真机**不可复现**。逻辑由 `src/model/empty.test.ts` + `src/host/events.test.ts`（走真实 router）覆盖 |
+
+其余场景（`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `conflict` / `kv-cleanup`）在 v1 开发期建立，并用于定位真实 bug（如 `kv-cleanup` 暴露两个 KV 残留根因、`continuation` 用于验证代际守卫的 `cont <= succeeded` 回归护栏）；**本次收尾未复跑**——发版前建议整包再跑一遍。
+
+调试时间戳（第 7 项）：`clock()` 改本地墙钟 `HH:mm:ss.SSS`，由 `src/host/debug.ts` 的 `debug.test.ts`（非 UTC 断言）覆盖。
+
+**发布相关（npm 渠道升级 / OIDC 真实发布）**：**推迟到 V2**（0.1.1 保留为 V2 发布起点），见 `known-issues.md` 的「V2 待办」。
