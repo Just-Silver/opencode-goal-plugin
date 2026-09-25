@@ -182,7 +182,7 @@ if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.
 | --- | --- |
 | 依赖非官方 metadata（tool 结果 / synthetic 通知） | 先真机核对；识别不到「起」→ 照常续跑（宁可漏 defer）；识别不到「止」→ 文本兜底 + 清空 |
 | metadata 形状漂移导致 pending 泄漏 → 不续跑 | 通知命中 `source`/文本时清空该会话 pending |
-| 插件热重载丢失 pending | 已知限制；后续可选「回放 transcript 重建」（prevalentWare 做法） |
+| 插件热重载丢失 pending | 已知限制。真正误续跑的窗口**很窄**：重载后任务若仍在跑，直到它完成通知唤醒会话前**没有** `succeeded`，而那一轮任务其实已结束、续跑是对的；只有「任务仍在跑 **且** 期间另有轮次结束」才会误续。后续可选「回放 transcript 重建」（prevalentWare 做法；本插件可用 `ctx.session.context({sessionID})` 取 `SessionMessage.Info[]`） |
 | 后台 shell 不限时且永不结束 → 一直不续跑 | 语义上正确（确有任务在跑）；用户可 `/goal-pause`。**按决定不加超时放行** |
 | 与宿主完成通知重复投递 | §3.4；`cont <= succeeded` 护栏 |
 
