@@ -95,6 +95,13 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
    * 非空 → 该会话轮末不自动续跑，等宿主完成通知唤醒（spec §4.1/§4.5）。
    */
   const pendingBackground = new Map<string, Set<string>>()
+  /**
+   * 已完成的后台任务 key → 完成时刻（`deps.now()`）。用于「完成通知先于起信号到达」的乱序护栏：
+   * 瞬时任务（如 `echo`）的完成通知可能先于 `session.tool.success` 到达，若不加护栏会在起信号时
+   * 又被加回 pending → 永久 defer。key 全局唯一（shell ID / 子会话 id），不会误挡合法的重新开始。
+   */
+  const recentlyCompleted = new Map<string, number>()
+  const RECENTLY_COMPLETED_TTL_MS = 30_000
   /** 事件不带 location 时的归属回落：会话所在目录缓存（每会话一次查询）。 */
   const sessionLocations = new Map<string, string | null>()
   const belongsToThisLocation = async (sessionID: string): Promise<boolean> => {
@@ -135,11 +142,46 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
     return current
   }
 
-  /** 后台任务「起」：加入 pending（spec §4.2）。 */
+  /** 后台任务「起」：加入 pending；若完成通知已先到（乱序护栏）则不加（spec §4.2）。 */
   const addPendingBackground = (sessionID: string, key: string): void => {
+    const at = recentlyCompleted.get(key)
+    if (at !== undefined && deps.now() - at <= RECENTLY_COMPLETED_TTL_MS) return
     const keys = pendingBackground.get(sessionID) ?? new Set<string>()
     keys.add(key)
     pendingBackground.set(sessionID, keys)
+  }
+
+  /** 只从 pending 移除 key（不记 `recentlyCompleted`）；用于会话删除等清理路径。 */
+  const dropPendingKey = (key: string): void => {
+    for (const [sid, keys] of pendingBackground) {
+      keys.delete(key)
+      if (keys.size === 0) pendingBackground.delete(sid)
+    }
+  }
+
+  /** 后台任务「止」：记录完成时刻（无论是否命中 pending），并从所有会话移除该 key（spec §4.3）。 */
+  const completeBackground = (key: string): void => {
+    const now = deps.now()
+    recentlyCompleted.set(key, now)
+    for (const [k, at] of recentlyCompleted) if (now - at > RECENTLY_COMPLETED_TTL_MS) recentlyCompleted.delete(k)
+    dropPendingKey(key)
+  }
+
+  /** 从完成通知的 metadata 取 key（主路径）。 */
+  const completionKeyFromMetadata = (metadata: Record<string, unknown>): string | undefined => {
+    if (metadata.source === "shell" && typeof metadata.shellID === "string") return metadata.shellID
+    if (metadata.source === "subagent" && typeof metadata.childID === "string") return metadata.childID
+    return undefined
+  }
+
+  /** 文本兜底：只认通知**最外层**标签，避免正文里的同名标签误伤（spec §4.3）。 */
+  const completionKeyFromText = (text: unknown): string | undefined => {
+    if (typeof text !== "string") return undefined
+    const shell = /^\s*<shell\b[^>]*\bid="([^"]+)"/.exec(text)
+    if (shell) return shell[1]
+    const subagent = /^\s*<subagent\b[^>]*\bsessionID="([^"]+)"/.exec(text)
+    if (subagent) return subagent[1]
+    return undefined
   }
 
   const save = async (sessionID: string, mutate: (goal: Goal, now: number) => Goal): Promise<void> => {
@@ -246,6 +288,19 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           if (metadata.status !== "running") return
           if (typeof metadata.shellID === "string") addPendingBackground(sessionID, metadata.shellID)
           else if (typeof metadata.sessionID === "string") addPendingBackground(sessionID, metadata.sessionID)
+          return
+        }
+
+        case "session.inbox.enqueued": {
+          // 后台任务的「止」：宿主完成通知走 Session.synthetic → admit → InboxEnqueued（spec §3.2/§4.3）。
+          const item = data.item as Record<string, unknown> | undefined
+          if (item?.type !== "synthetic") return
+          const payload = (item.payload ?? {}) as Record<string, unknown>
+          const key =
+            completionKeyFromMetadata((payload.metadata ?? {}) as Record<string, unknown>) ??
+            completionKeyFromText(payload.text)
+          if (key === undefined) return
+          completeBackground(key)
           return
         }
 

@@ -59,6 +59,13 @@ const toolSuccess = (sessionID: string, metadata: Record<string, unknown>) => ({
   type: "session.tool.success",
   data: { sessionID, metadata },
 })
+const inboxEnqueued = (sessionID: string, metadata: Record<string, unknown>, text?: string) => ({
+  type: "session.inbox.enqueued",
+  data: {
+    sessionID,
+    item: { type: "synthetic", payload: { metadata, ...(text === undefined ? {} : { text }) } },
+  },
+})
 
 describe("createEventRouter", () => {
   test("accrues tokens and continues once on execution end", async () => {
@@ -576,7 +583,7 @@ describe("createEventRouter", () => {
     expect(injected).toBe(0)
   })
 
-  test("a running background shell defers continuation until it completes", async () => {
+  test("a running background shell defers continuation", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const prompts: string[] = []
@@ -619,5 +626,70 @@ describe("createEventRouter", () => {
     await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_1" }))
     const state = router.diagnostics().sessions.find((item) => item.sessionID === "ses_1")
     expect(state?.pendingBackground).toBe(1)
+  })
+
+  test("a background subagent's completion clears pending via the text fallback", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", sessionID: "ses_child" }))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+    // metadata 无 source（形状漂移）→ 走最外层标签文本兜底
+    await router.handle(
+      inboxEnqueued("ses_1", {}, `<subagent sessionID="ses_child" state="completed" description="x">\ndone\n</subagent>`),
+    )
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
+  })
+
+  test("a user shell completion notification does not clear a background pending", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_bg" }))
+    await router.handle(executionSucceeded("ses_1"))
+    // 用户 `!命令` 的完成通知：shellID 不在 pending → 只按 key 移除，不得清空
+    await router.handle(inboxEnqueued("ses_1", { source: "shell", shellID: "sh_user" }))
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+  })
+
+  test("a completion notification arriving before the start signal still suppresses the pending", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    // 瞬时任务：完成通知先到（key 尚未进 pending）
+    await router.handle(inboxEnqueued("ses_1", { source: "shell", shellID: "sh_fast" }))
+    // 起信号后到 → 乱序护栏应拦住，不再入 pending
+    await router.handle(toolSuccess("ses_1", { status: "running", shellID: "sh_fast" }))
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual(["ses_1"])
   })
 })
