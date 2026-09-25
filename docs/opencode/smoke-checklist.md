@@ -106,13 +106,20 @@
 - 结论：语言探测（`Intl` → `zh-CN`）与 `messages` 接线在真机生效。
 - `language` 显式覆盖未单独真机测（单测已覆盖 `resolveOptions` 归一与 `resolveLanguage` 优先级）。
 
-## 10. 自动续跑计数 + 预算随时可调真机验收（实现已完成；真机待跑，V2 子项目 6）
+## 10. 自动续跑计数 + 预算随时可调真机验收（2026-09-26，V2 子项目 6）
 
-> 代码已在分支 `feat/v2-continuation-count-and-budget` 落地并通过单测；**真机验收尚未执行**，发布前按 spec §6 执行并在此补结论。
+> 会话 `ses_f2547edb5ffe2s49U3GyPShRQB`（location `D:\下载\Goal-test`，模型 `xiaomi/mimo-v2.6-flash`）。
+> 插件临时以**本地目录**安装（`plugins: [{ "package": "<repo>" }]`，加载分支 `feat/v2-continuation-count-and-budget` 的**未发布**代码），验收后已**复原为 npm 包**。
+> 探针脚本 `.superpowers/budget-count-smoke.mjs`（一次性、已 gitignore）。
 
-- `/goal-status` 显示「自动续跑 N 次」。
-- 跨轮续跑 notice 依次 `目标自动续跑 #1` / `#2`…
-- `token_budget=1` → `budget-limited` → `/goal-budget 500000`：状态回「进行中」，回执「预算已设为 500000；目标当前为「进行中」。」；再发一条消息后继续续跑。
-- `/goal-budget none`：回执「已取消预算（不限）；…」；`/goal-status` 显示「无预算」。
-- 对话式「预算加到 50 万」：模型调用 `goal(op="budget", token_budget=500000)`。
-- 回归：`smoke-api.mjs --scenario budget` PASS；`--scenario continuation` 的 `cont <= succeeded` 仍成立。
+- **确定性分支（零 token）**：`/goal-status` 无目标 → 「本会话未设置目标。」；`/goal-budget` 空参 → 用法；`/goal-budget abc` → 「无效的预算「abc」…」；`/goal-budget 9007199254740993`（超 safe integer）→ 非法；`/goal-budget 500` 无目标 → 未设置目标。**5/5** ✓
+- **预算护栏 + 计数展示**：模型建 `token_budget=1` 目标 → 状态行 `目标（预算用尽）— tokens 22631 / 预算 1（cacheRead 10368 · 新增 12263）；4s；自动续跑 0 次。目标：…` ✓
+- **改大自动恢复**：`/goal-budget 500000` → 回执「预算已设为 500000；目标当前为「进行中」。」；状态确为 `进行中` + `预算 500000` ✓
+- **清空预算**：`/goal-budget none` → 「已取消预算（不限）；目标当前为「进行中」。」；状态显示 `无预算` ✓
+- **命令改额**：`/goal-budget 300000` → 「预算已设为 300000；目标当前为「进行中」。」 ✓
+- **对话式改额**：prompt「把当前目标的 token 预算改成 250000（用 goal 工具的 budget op）」→ 模型调用 `goal(op="budget")`，状态行显示 `预算 250000` ✓
+- **自动续跑计数**：续跑回执 `目标自动续跑 #2 · …`；`/goal-status` 显示 `自动续跑 1 次`；`/goal-debug state` 显示 `continuations=2` ✓
+- **清理**：`/goal-clear` → 「目标已清除。」 ✓
+- **回归**：`smoke-api.mjs --session <sid> --scenario budget` **PASS**（9.3s）✓
+- **汇总：探针 18/18 PASS。**
+- **已知陈旧（非本次回归）**：`smoke-api.mjs` 的 `commands` / `continuation` / `background*` 场景用**英文正则**匹配回执（`/No goal/i`、`/Goal auto-continue/i`），i18n 交付后在 `zh-CN` 机器上已失效（本次只跑了语言无关的 `budget` 场景）。建议后续把这类正则改成中英双语，或按 `language: "en"` 固定语言跑冒烟。
