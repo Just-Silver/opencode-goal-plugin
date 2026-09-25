@@ -203,7 +203,9 @@ goal({
 
 ## 15. 阶段二
 
-TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`；宿主终态错误 → `blocked`；子会话 deferral；i18n；跨会话列表。
+TUI 侧边栏（config-install 方案 B，不用 Solid/JSX）；`usage-limited`；宿主终态错误 → `blocked`；子会话 deferral；i18n。
+
+- **跨会话列表：2026-09-25 决定不做。** 理由：① Codex / OMP **均无**此能力（非本取向内功能），唯一来源是第三方 prevalentWare 的 `list_all`；② 聚合需求已由 `/goal-debug sessions`（列出本 location 全部 goal 记录）覆盖；③ per-session 单目标工作流下收益低。若将来确有需求，最小做法是把 `/goal-debug sessions` 提升为正式只读命令（复用 `repository.listAll`，零新逻辑）。
 
 ## 16. 参考
 
