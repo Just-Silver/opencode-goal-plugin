@@ -8,3 +8,14 @@ export function noticeLine(label: string, detail: string, max = 72): string {
   const clipped = flat.length <= max ? flat : `${flat.slice(0, Math.max(0, max - 1))}…`
   return `${label} · ${clipped}`
 }
+
+import type { GoalStatus } from "../model/types"
+
+/** 宿主信号改状态后的纯回执行（`session.synthetic` 的 description 与 text 同用）。 */
+export function signalNotice(status: GoalStatus, message: string): string {
+  const flat = message.replace(/\s+/g, " ").trim()
+  const detail = flat.length === 0 ? "" : `: ${flat}`
+  if (status === "usage-limited") return `Goal marked usage-limited${detail}. Use /goal-resume after the limit resets.`
+  if (status === "budget-limited") return `Goal marked budget-limited${detail}. Use /goal-resume to continue.`
+  return `Goal marked blocked${detail}. Use /goal-resume after resolving it.`
+}

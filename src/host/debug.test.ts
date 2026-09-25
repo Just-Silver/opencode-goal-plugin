@@ -39,7 +39,7 @@ function makeDeps(): GoalDeps {
 }
 
 function makeDebug(deps: GoalDeps) {
-  const router = createEventRouter(deps, { onIdle: async () => false })
+  const router = createEventRouter(deps, { onIdle: async () => false }, async () => {})
   return { debug: createDebug(deps, { pluginId: "opencode-goal", snapshot: () => router.diagnostics() }), router }
 }
 

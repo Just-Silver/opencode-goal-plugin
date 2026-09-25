@@ -42,8 +42,10 @@ function makeDeps(): GoalDeps {
  * 模拟真实事件流：带 location 的事件标上本 location。事件自带 location 时以它为准
  * （`...event` 在 `location` 之后，所以显式传入的 location 会覆盖），便于测试跨 location 忽略。
  */
-function makeRouter(deps: GoalDeps, continuation: Continuation) {
-  const inner = createEventRouter(deps, continuation)
+function makeRouter(deps: GoalDeps, continuation: Continuation, notices: string[] = []) {
+  const inner = createEventRouter(deps, continuation, async (_sessionID, text) => {
+    notices.push(text)
+  })
   return {
     handle: (event: { type: string; data?: Record<string, unknown>; location?: { directory?: unknown } }) =>
       inner.handle({ location: { directory: deps.locationDirectory }, ...event }),
@@ -55,6 +57,10 @@ function makeRouter(deps: GoalDeps, continuation: Continuation) {
 const executionStarted = (sessionID: string) => ({ type: "session.execution.started", data: { sessionID } })
 const executionSucceeded = (sessionID: string) => ({ type: "session.execution.succeeded", data: { sessionID } })
 const executionFailed = (sessionID: string) => ({ type: "session.execution.failed", data: { sessionID } })
+const executionFailedWithError = (sessionID: string, error: Record<string, unknown>) => ({
+  type: "session.execution.failed",
+  data: { sessionID, error },
+})
 const toolSuccess = (sessionID: string, metadata: Record<string, unknown>) => ({
   type: "session.tool.success",
   data: { sessionID, metadata },
@@ -550,12 +556,16 @@ describe("createEventRouter", () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
-      onIdle: async () => {
-        injected += 1
-        return true
+    const router = createEventRouter(
+      deps,
+      {
+        onIdle: async () => {
+          injected += 1
+          return true
+        },
       },
-    })
+      async () => {},
+    )
     // 不带 location 的事件回落到查询会话目录（本 location）→ 放行；但 agent 未知 → 不续跑
     await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
     await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
@@ -571,12 +581,16 @@ describe("createEventRouter", () => {
     const deps = { ...makeDeps(), sessionDirectory: async () => "other-location" }
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     let injected = 0
-    const router = createEventRouter(deps, {
-      onIdle: async () => {
-        injected += 1
-        return true
+    const router = createEventRouter(
+      deps,
+      {
+        onIdle: async () => {
+          injected += 1
+          return true
+        },
       },
-    })
+      async () => {},
+    )
     await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
     await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
     await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
@@ -856,6 +870,119 @@ describe("createEventRouter", () => {
     await router.handle(executionStarted("ses_1"))
     await router.handle(toolSuccess("ses_1", { status: "running", sessionID: "ses_child" }))
     await router.handle(executionSucceeded("ses_1"))
+    expect(prompts).toEqual([])
+  })
+
+  test("a quota failure marks the goal usage-limited and notifies once", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(
+      executionFailedWithError("ses_1", { type: "provider.quota", message: "weekly usage limit reached" }),
+    )
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("usage-limited")
+    expect(goal?.lastError).toEqual({ type: "provider.quota", message: "weekly usage limit reached", at: 1000 })
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain("usage-limited")
+  })
+
+  test("a quota failure with an empty message omits the detail clause", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "" }))
+    expect(notices[0]).toBe("Goal marked usage-limited. Use /goal-resume after the limit resets.")
+  })
+
+  test("an auth failure marks the goal blocked and notifies", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.auth", message: "invalid api key" }))
+    expect((await deps.repo.load("ses_1"))?.status).toBe("blocked")
+    expect(notices[0]).toContain("blocked")
+  })
+
+  test("excluded and retryable failures leave the status unchanged and stay silent", async () => {
+    for (const type of ["provider.no-route", "provider.timeout", "provider.rate-limit", "provider.unknown"]) {
+      const deps = makeDeps()
+      await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+      const notices: string[] = []
+      const router = makeRouter(deps, { onIdle: async () => false }, notices)
+      await router.handle(executionStarted("ses_1"))
+      await router.handle(executionFailedWithError("ses_1", { type, message: "x" }))
+      expect((await deps.repo.load("ses_1"))?.status).toBe("active")
+      expect(notices).toHaveLength(0)
+    }
+  })
+
+  test("a host signal applies even without an open turn", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    // 未收到 execution.started（模拟插件重启后接入）
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "quota" }))
+    expect((await deps.repo.load("ses_1"))?.status).toBe("usage-limited")
+    expect(notices).toHaveLength(1)
+  })
+
+  test("a host signal does not touch a paused or completed goal", async () => {
+    for (const status of ["paused", "complete", "budget-limited"] as const) {
+      const deps = makeDeps()
+      const base = createGoal({ goalId: "g1", objective: "o", now: 0 })
+      await deps.repo.save("ses_1", { ...base, status })
+      const notices: string[] = []
+      const router = makeRouter(deps, { onIdle: async () => false }, notices)
+      await router.handle(executionStarted("ses_1"))
+      await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "quota" }))
+      expect((await deps.repo.load("ses_1"))?.status).toBe(status)
+      expect(notices).toHaveLength(0)
+    }
+  })
+
+  test("a host signal on an already usage-limited goal is a no-op with no notice", async () => {
+    const deps = makeDeps()
+    const base = createGoal({ goalId: "g1", objective: "o", now: 0 })
+    await deps.repo.save("ses_1", {
+      ...base,
+      status: "usage-limited",
+      lastError: { type: "provider.quota", message: "old", at: 1 },
+    })
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.auth", message: "auth" }))
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.status).toBe("usage-limited")
+    expect(goal?.lastError?.message).toBe("old")
+    expect(notices).toHaveLength(0)
+  })
+
+  test("a failed turn still settles accounting and never continues", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const prompts: string[] = []
+    const router = makeRouter(deps, {
+      onIdle: async (sessionID) => {
+        prompts.push(sessionID)
+        return true
+      },
+    })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 2 } } },
+    })
+    await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "quota" }))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(167)
     expect(prompts).toEqual([])
   })
 })

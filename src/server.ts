@@ -56,7 +56,7 @@ export default {
 
     // 事件路由先建：命令/工具/调试视图都要引用它。
     const continuation = createContinuation(deps, { deliver })
-    const router = createEventRouter(deps, continuation)
+    const router = createEventRouter(deps, continuation, notify)
     routerRef = router
     const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
 

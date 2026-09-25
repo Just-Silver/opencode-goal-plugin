@@ -2,10 +2,12 @@ import { resetBlockerStreak } from "../model/blocked"
 import { applyTurn } from "../model/empty"
 import { pause } from "../model/goal"
 import { applyBudget } from "../model/limits"
+import { applyHostSignal, hostSignal } from "../model/signals"
 import { accrue, addDelta, emptyDelta, type TokenDelta } from "../model/usage"
 import type { Goal } from "../model/types"
 import type { Continuation } from "./continuation"
 import type { GoalDeps } from "./deps"
+import { signalNotice } from "./notice"
 import { createTurnTracker, type TurnTracker } from "./turn"
 
 export interface EventLike {
@@ -50,6 +52,9 @@ export interface EventRouter {
   pendingUsage(sessionID: string): { tokens: TokenDelta; elapsedSeconds: number } | undefined
 }
 
+/** 纯回执出口：把一行提示显示给用户（不唤醒模型）。 */
+export type Notify = (sessionID: string, text: string) => Promise<void>
+
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
@@ -82,7 +87,7 @@ const TRACKED_TYPES = new Set([
 ])
 const DEBUG_EVENT_LIMIT = 50
 
-export function createEventRouter(deps: GoalDeps, continuation: Continuation): EventRouter {
+export function createEventRouter(deps: GoalDeps, continuation: Continuation, notify: Notify): EventRouter {
   const agents = new Map<string, string>()
   const pendingAutomatic = new Set<string>()
   const blockedThisTurn = new Map<string, boolean>()
@@ -344,8 +349,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           return
         }
 
-        case "session.execution.succeeded":
-        case "session.execution.failed": {
+        case "session.execution.succeeded": {
           // 轮结束才结算；未开轮的结束事件（插件重启后接入）不结算、不续跑。
           if (!turnOpen.has(sessionID)) return
           turnOpen.delete(sessionID)
@@ -363,8 +367,6 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
             // spec §7：某轮未报 block → streak 归零；报了 block 则保留（由本层判定，model 只负责归零）。
             return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
           })
-          // 只有成功结束才续跑：failed 保守跳过，避免在报错时形成续跑循环。
-          if (event.type !== "session.execution.succeeded") return
           if (blocked) return
           // 后台任务在跑 → 本轮不续跑；宿主完成通知会唤醒会话（spec §4.5）。
           if ((pendingBackground.get(sessionID)?.size ?? 0) > 0) return
@@ -375,6 +377,32 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation): E
           if (agent === undefined) return
           const injected = await continuation.onIdle(sessionID, agent)
           if (injected) pendingAutomatic.add(sessionID)
+          return
+        }
+
+        case "session.execution.failed": {
+          // 结算（仅当本插件看到过该轮开始）；failed 永不续跑，避免在报错时形成续跑循环。
+          if (turnOpen.has(sessionID)) {
+            turnOpen.delete(sessionID)
+            const facts = tracker(sessionID).finish()
+            const reportedBlocker = blockedThisTurn.get(sessionID) === true
+            blockedThisTurn.set(sessionID, false)
+            const usage = turnUsage.get(sessionID)
+            turnUsage.delete(sessionID)
+            await save(sessionID, (goal, now) => {
+              const accrued = usage?.touched ? accrue(goal, usage.tokens, usage.elapsedSeconds, now) : goal
+              const result = applyTurn(accrued, facts, deps.options.emptyThreshold, now)
+              return reportedBlocker ? result.goal : resetBlockerStreak(result.goal)
+            })
+          }
+          // 宿主信号 → 状态（spec §4.3/§4.4）：无论是否开轮都套用（插件重启后接入也要改状态）。
+          const signal = hostSignal(data.error)
+          if (!signal) return
+          const before = await deps.repo.load(sessionID)
+          if (!before) return
+          await save(sessionID, (goal, now) => applyHostSignal(goal, now, signal))
+          const after = await deps.repo.load(sessionID)
+          if (after && after.status !== before.status) await notify(sessionID, signalNotice(after.status, signal.message))
           return
         }
 
