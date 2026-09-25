@@ -164,6 +164,7 @@ Expected: PASS
     expect(resolveOptions({ language: "zh" }).language).toBe("zh-CN")
     expect(resolveOptions({ language: "zh_CN" }).language).toBe("zh-CN")
     expect(resolveOptions({ language: "EN" }).language).toBe("en")
+    expect("language" in DEFAULT_OPTIONS).toBe(false)
   })
 
   test("rejects a malformed language", () => {
@@ -273,6 +274,15 @@ describe("catalogs", () => {
   test("zh-CN differs from en for every key (no untranslated copy)", () => {
     for (const key of Object.keys(en) as MessageKey[]) {
       expect(zhCN[key]).not.toBe(en[key])
+    }
+  })
+
+  test("every template renders without leftover placeholders when all placeholders are supplied", () => {
+    for (const catalog of [en, zhCN]) {
+      for (const value of Object.values(catalog)) {
+        const params = Object.fromEntries(placeholders(value).map((name) => [name, "x"]))
+        expect(format(value, params)).not.toMatch(/\{[a-zA-Z]+\}/)
+      }
     }
   })
 })
@@ -614,7 +624,32 @@ git commit -m "feat(i18n): 中英消息目录 + format/statusLabel（键与占�
 - Consumes: `messagesFor`（`../i18n`）、`format` / `statusLabel` / `Messages`（`../i18n/messages`）、`resolveLanguage` / `systemLocale`（`../i18n/language`）
 - Produces: `GoalDeps.messages: Messages`（必填）
 
-- [ ] **Step 1: 修改 `src/host/deps.ts`**
+- [ ] **Step 1: 写失败测试（中文回执）**
+
+在 `src/host/commands.test.ts` 顶部加 `import { messagesFor } from "../i18n"`，并在 `describe("createCommandHandlers", ...)` 内追加：
+
+```ts
+  test("notices follow the injected language", async () => {
+    const deps = { ...makeDeps(), messages: messagesFor("zh-CN") }
+    const { handlers, notices } = runner(deps)
+    await handlers.status("ses_1")
+    expect(notices[0]).toBe("本会话未设置目标。")
+  })
+
+  test("a rendered status line leaves no placeholders", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }))
+    await handlers.status("ses_1")
+    expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
+  })
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `bun test src/host/commands.test.ts`
+Expected: FAIL（`notices[0]` 仍是英文 `No goal is set for this session.`）
+
+- [ ] **Step 3: 修改 `src/host/deps.ts`**
 
 顶部加导入：
 
@@ -629,7 +664,7 @@ import type { Messages } from "../i18n/messages"
   readonly messages: Messages
 ```
 
-- [ ] **Step 2: 修改 `src/host/commands.ts`**
+- [ ] **Step 4: 修改 `src/host/commands.ts`**
 
 顶部加导入：
 
@@ -724,7 +759,7 @@ function statusLine(goal: Goal, messages: Messages): string {
 }
 ```
 
-- [ ] **Step 3: 修改 `src/host/continuation.ts`**
+- [ ] **Step 5: 修改 `src/host/continuation.ts`**
 
 把 `description: noticeLine("Goal auto-continue", goal.objective)` 改为：
 
@@ -732,13 +767,12 @@ function statusLine(goal: Goal, messages: Messages): string {
         description: noticeLine(deps.messages["label.autoContinue"], goal.objective),
 ```
 
-- [ ] **Step 4: 修改 `src/server.ts`**
+- [ ] **Step 6: 修改 `src/server.ts`**
 
 顶部加导入：
 
 ```ts
-import { messagesFor } from "./i18n"
-import { resolveLanguage, systemLocale } from "./i18n/language"
+import { messagesFor, resolveLanguage, systemLocale } from "./i18n"
 ```
 
 在 `const options = resolveOptions(ctx.options)` 之后加：
@@ -771,7 +805,7 @@ import { resolveLanguage, systemLocale } from "./i18n/language"
                 description: messages["tool.debug.op"],
 ```
 
-- [ ] **Step 5: 更新全部测试 helper**
+- [ ] **Step 7: 更新全部测试 helper**
 
 在下列文件的 `makeDeps()` 返回对象里加 `messages: messagesFor("en"),`（与 `options` 同级），并在文件顶部加 `import { messagesFor } from "../i18n"`：
 
@@ -784,32 +818,12 @@ import { resolveLanguage, systemLocale } from "./i18n/language"
 
 `src/server.test.ts`：把 `mockCtx` 里的 `options: {},` 改为 `options: { language: "en" },`（走 `setup` 的测试不得依赖机器 locale）。
 
-- [ ] **Step 6: 追加中文用例到 `src/host/commands.test.ts`**
-
-在 `describe("createCommandHandlers", ...)` 内追加：
-
-```ts
-  test("notices follow the injected language", async () => {
-    const deps = { ...makeDeps(), messages: messagesFor("zh-CN") }
-    const { handlers, notices } = runner(deps)
-    await handlers.status("ses_1")
-    expect(notices[0]).toBe("本会话未设置目标。")
-  })
-
-  test("a rendered status line leaves no placeholders", async () => {
-    const { deps, handlers, notices } = makeHandler()
-    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100 }))
-    await handlers.status("ses_1")
-    expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
-  })
-```
-
-- [ ] **Step 7: 运行测试 + 类型检查**
+- [ ] **Step 8: 运行测试 + 类型检查**
 
 Run: `bun test && bunx tsc --noEmit`
 Expected: 全绿，tsc 无输出
 
-- [ ] **Step 8: 提交**
+- [ ] **Step 9: 提交**
 
 ```bash
 git add src/host/deps.ts src/server.ts src/host/commands.ts src/host/continuation.ts src/host/commands.test.ts src/host/continuation.test.ts src/host/debug.test.ts src/host/events.test.ts src/host/hooks.test.ts src/host/tools.test.ts src/server.test.ts
@@ -838,6 +852,7 @@ git commit -m "feat(i18n): 语言经 GoalDeps 注入，命令/续跑/命令描�
     const text = await debug.render("env", "ses_1")
     expect(text).toContain("是否属于本实例：是")
     expect(text).toContain("会话：ses_1")
+    expect(text).not.toMatch(/\{[a-zA-Z]+\}/)
   })
 ```
 
@@ -960,15 +975,19 @@ async function renderState(
     [
       format(messages["debug.state.session"], { id: sessionID }),
       format(messages["debug.state.turnOpen"], {
-        value: state === undefined ? messages["debug.noTrackedState"] : state.turnOpen,
+        value: state === undefined ? messages["debug.noTrackedState"] : String(state.turnOpen),
       }),
       format(messages["debug.state.agent"], { agent: state?.agent ?? messages["debug.unknown"] }),
       format(messages["debug.state.directoryCache"], {
         dir: cache === undefined || cache === null ? messages["debug.none"] : cache,
       }),
-      format(messages["debug.state.pendingAutomatic"], { value: state === undefined ? "-" : state.pendingAutomatic }),
+      format(messages["debug.state.pendingAutomatic"], {
+        value: state === undefined ? "-" : String(state.pendingAutomatic),
+      }),
       format(messages["debug.state.pendingBackground"], { value: state === undefined ? "-" : state.pendingBackground }),
-      format(messages["debug.state.blockedThisTurn"], { value: state === undefined ? "-" : state.blockedThisTurn }),
+      format(messages["debug.state.blockedThisTurn"], {
+        value: state === undefined ? "-" : String(state.blockedThisTurn),
+      }),
       format(messages["debug.state.goal"], {
         goal:
           goal === undefined
@@ -1047,6 +1066,7 @@ git commit -m "feat(i18n): /goal-debug 输出本地化"
     await router.handle(executionStarted("ses_1"))
     await router.handle(executionFailedWithError("ses_1", { type: "provider.quota", message: "weekly usage limit" }))
     expect(notices[0]).toBe("目标已标记为用量受限：weekly usage limit。配额恢复后可用 /goal-resume 继续。")
+    expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
   })
 ```
 
@@ -1203,9 +1223,10 @@ git commit -m "feat(i18n): goal 工具描述与参数说明本地化"
 **Files:**
 - Modify: `README.md`（配置项表）
 - Modify: `CHANGELOG.md`（`[Unreleased]`）
-- Modify: `docs/opencode/config-install.md`（选项说明处）
-- Modify: `docs/opencode/known-issues.md`（V2 待办段）
+- Modify: `docs/opencode/known-issues.md`（V2 待办段，新增状态说明）
 - Modify: `docs/superpowers/specs/2026-09-25-opencode-goal-v2-i18n-design.md`（状态改为已实现）
+
+> `docs/opencode/config-install.md` **不改**：它是安装机制资料，没有本插件的选项表/列表；选项以 README 的「配置项」表为准。
 
 - [ ] **Step 1: `README.md` 配置项表加一行**
 
@@ -1221,23 +1242,15 @@ git commit -m "feat(i18n): goal 工具描述与参数说明本地化"
 - **国际化（i18n）**：面向用户文案（命令描述、`/goal-*` 回执、状态行、宿主信号回执、`/goal-debug` 输出）与 `goal` 工具描述/参数说明支持中英双语；语言默认跟随系统 locale（`Intl` 探测），可用配置项 `language` 显式覆盖。模型提示词与日志保持英文。
 ```
 
-- [ ] **Step 3: `docs/opencode/config-install.md` 选项说明处加 `language`**
-
-在该文档描述插件选项的位置（若为表格则加行，若为列表则加项）：
-
-```markdown
-- `language`：面向用户文案语言，`"zh-CN"` / `"en"`；缺省跟随系统 locale。
-```
-
-- [ ] **Step 4: `docs/opencode/known-issues.md` 的 V2 待办段**
+- [ ] **Step 3: `docs/opencode/known-issues.md` 的 V2 待办段新增一条状态说明**
 
 在「宿主信号 → 状态」条目之后加：
 
 ```markdown
-> 「国际化（i18n）」已于 V2 实现（见 `CHANGELOG.md` 的 `[Unreleased]`），条目移出。默认跟随系统 locale，可用 `language` 覆盖。
+> 「国际化（i18n）」已于 V2 实现（见 `CHANGELOG.md` 的 `[Unreleased]`）。默认跟随系统 locale，可用 `language` 覆盖。
 ```
 
-- [ ] **Step 5: 把 spec 状态改为已实现**
+- [ ] **Step 4: 把 spec 状态改为已实现**
 
 `docs/superpowers/specs/2026-09-25-opencode-goal-v2-i18n-design.md` 顶部状态行改为：
 
@@ -1245,11 +1258,11 @@ git commit -m "feat(i18n): goal 工具描述与参数说明本地化"
 - 状态：**已实现（2026-09-25）**
 ```
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
-git add README.md CHANGELOG.md docs/opencode/config-install.md docs/opencode/known-issues.md docs/superpowers/specs/2026-09-25-opencode-goal-v2-i18n-design.md
-git commit -m "docs: 回填 i18n（README/CHANGELOG/config-install/known-issues/spec）"
+git add README.md CHANGELOG.md docs/opencode/known-issues.md docs/superpowers/specs/2026-09-25-opencode-goal-v2-i18n-design.md
+git commit -m "docs: 回填 i18n（README/CHANGELOG/known-issues/spec）"
 ```
 
 ---
@@ -1260,7 +1273,7 @@ git commit -m "docs: 回填 i18n（README/CHANGELOG/config-install/known-issues/
 
 - [ ] **Step 1: 复原 `~/.config/opencode/opencode.json` 的 plugins**
 
-把 `plugins` 恢复为：
+先读取该文件确认**当前/原始形态**（本机此前为字符串形式 `["E:/Code/Projects/Agent/opencode-goal"]`），按原样恢复：
 
 ```json
   "plugins": ["E:/Code/Projects/Agent/opencode-goal"]
