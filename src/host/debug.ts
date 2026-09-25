@@ -122,7 +122,7 @@ async function renderState(
         goal:
           goal === undefined
             ? messages["debug.none"]
-            : `${goal.status}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`,
+            : `${goal.status}, continuations=${goal.continuations ?? 0}, emptyStreak=${goal.emptyStreak}, blockerStreak=${goal.blockerStreak}`,
       }),
     ],
     messages,

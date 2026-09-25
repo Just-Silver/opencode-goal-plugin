@@ -151,4 +151,12 @@ describe("createDebug", () => {
     expect(text).toContain("调试")
     expect(text.split("\n")).toHaveLength(1)
   })
+
+  test("state includes the auto-continue count", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), continuations: 4 })
+    const { debug } = makeDebug(deps)
+    const text = await debug.render("state", "ses_1")
+    expect(text).toContain("continuations=4")
+  })
 })
