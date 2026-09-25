@@ -22,8 +22,8 @@ export function parseToolArgs(raw: unknown): ToolArgsResult {
     return { ok: false, message: `goal: op must be one of ${OPS.join(", ")}` }
   let tokenBudget: number | undefined
   if (record.token_budget !== undefined) {
-    if (typeof record.token_budget !== "number" || !Number.isInteger(record.token_budget) || record.token_budget <= 0)
-      return { ok: false, message: "goal: token_budget must be a positive integer" }
+    if (typeof record.token_budget !== "number" || !Number.isInteger(record.token_budget) || record.token_budget < 0)
+      return { ok: false, message: "goal: token_budget must be a non-negative integer (0 = no budget)" }
     tokenBudget = record.token_budget
   }
   return {

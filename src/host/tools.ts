@@ -74,7 +74,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
             goalId: deps.newGoalId(),
             objective: check.objective,
             now,
-            tokenBudget: args.tokenBudget ?? deps.options.tokenBudget,
+            tokenBudget: args.tokenBudget === 0 ? undefined : (args.tokenBudget ?? deps.options.tokenBudget),
             maxTokenBudget: deps.options.maxGoalTokenBudget,
           })
           await deps.repo.save(sessionID, goal)

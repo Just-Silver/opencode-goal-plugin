@@ -50,6 +50,13 @@ describe("createGoalTool", () => {
     expect(result.goal.objective).toBe("finish X")
   })
 
+  test("create with token_budget 0 means no budget (ignores the config default)", async () => {
+    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, tokenBudget: 999 } })
+    const tool = createGoalTool(deps)
+    const result = parse(await tool.execute({ op: "create", objective: "x", token_budget: 0 }, ctx))
+    expect(result.goal.tokenBudget).toBeNull()
+  })
+
   test("overlays the in-flight turn usage on tool results", async () => {
     // 记账改成轮末落盘后，KV 在轮中还是旧值；工具返回必须叠加内存里的本轮 pending。
     const deps = makeDeps({

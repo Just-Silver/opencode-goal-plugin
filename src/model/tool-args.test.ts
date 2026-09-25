@@ -14,11 +14,13 @@ describe("parseToolArgs", () => {
     })
   })
 
-  test("rejects a non-positive token_budget", () => {
-    expect(parseToolArgs({ op: "create", token_budget: 0 })).toEqual({
-      ok: false,
-      message: expect.stringContaining("token_budget"),
-    })
+  test("accepts token_budget 0 (means no budget) but rejects negatives and fractions", () => {
+    expect(parseToolArgs({ op: "create", token_budget: 0 })).toEqual({ ok: true, args: { op: "create", tokenBudget: 0 } })
+    for (const token_budget of [-1, 1.5])
+      expect(parseToolArgs({ op: "create", token_budget })).toEqual({
+        ok: false,
+        message: expect.stringContaining("token_budget"),
+      })
   })
 
   test("accepts a block call", () => {
