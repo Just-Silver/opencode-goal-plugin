@@ -118,10 +118,10 @@ blocked 状态字段：`blockerKey`（稳定 slug）、`blockerText`（展示）
 ## 6. 记账与持久化 **[定·倾向]**
 
 - **token delta（0.1.1 起）**：计 **`input + output + reasoning + cacheRead + cacheWrite`**（真实处理量）。cacheRead 是每轮重读整个上下文的量，既是真实消耗也是 runaway 最灵敏的信号；Codex/OMP 只算「新工作」（不含 cacheRead），我们有意不同。分项一并存进记录，`status` 可展示「总量 / 重读 / 新工作」。
-- **记账时机**：`step.ended` 只累加内存，**轮末或中断时一次性落账**（收尾轮不再漏记）。
+- **记账时机**：每个 `session.step.ended` **增量落盘一次**（对齐 codex 的 `on_tool_finish` / omp 的 `onToolCompleted`），轮末/中断再结算残留；最坏丢失窗口 = 一次模型调用（收尾轮不再漏记）。
 - **墙钟**：按秒累加，差值记账。
-- **串行化**：记账用 promise 链/信号量，避免并发。
-- **落盘节流**：只在大 delta、状态翻转、会话切换前写。
+- **串行化**：宿主**串行派发事件**（`for await … await router.handle`），写点天然不交错；写成功后清零累加器，保证同一段用量只写一次。
+- **落盘节流**：**不做定时节流**；用「delta>0」变化门控（空写跳过）。
 - 持久化：JSON 文件 + **原子写**（temp + fsync + rename + 目录 fsync），损坏隔离；**超长目标整段省略**（不截断，避免"截断把限制变授权"）。
 
 ### 6.1 状态存储与清理 [定]

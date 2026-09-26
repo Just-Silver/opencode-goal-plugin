@@ -3,7 +3,7 @@ import { applyTurn } from "../model/empty"
 import { pause } from "../model/goal"
 import { applyBudget } from "../model/limits"
 import { applyHostSignal, hostSignal } from "../model/signals"
-import { accrue, addDelta, emptyDelta, type TokenDelta } from "../model/usage"
+import { accrue, addDelta, emptyDelta, tokenCost, type TokenDelta } from "../model/usage"
 import type { Goal, StopReason } from "../model/types"
 import type { Continuation } from "./continuation"
 import type { GoalDeps } from "./deps"
@@ -232,6 +232,29 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, an
       await announce(sessionID, { reason: "budget-limited", message: "" })
   }
 
+  /**
+   * 增量落盘：把「自上次落盘以来」累积的轮内用量写进目标。对齐 codex 的 `on_tool_finish` /
+   * omp 的 `onToolCompleted` —— 在轮内（每个 `step.ended`）就写一次，把最坏丢失窗口从
+   * 「一整轮 execution」压到「一次模型调用」（reload / 崩溃时最多丢当前这一步）。
+   *
+   * 只做记账：**不判预算、不发停摆回执**——那两件事仍由轮末的 `save` 统一处理，避免把
+   * `session.synthetic(resume:true)` 在轮中途发出去（语义未验证）。
+   *
+   * 防重复靠「**写成功后才清零**」：清零发生在本函数末尾，同一段用量只会被写一次；
+   * 若写失败则保留累加器，下一个写点重试（不丢、不重复）。事件由宿主**串行**派发
+   * （`server.ts` 的 `for await … await router.handle`），故两个写点不会交错读到同一累加器。
+   */
+  const flushTurnUsage = async (sessionID: string): Promise<void> => {
+    const usage = turnUsage.get(sessionID)
+    if (!usage?.touched) return
+    if (tokenCost(usage.tokens) <= 0 && usage.elapsedSeconds <= 0) return
+    const before = await deps.repo.load(sessionID)
+    if (!before) return
+    await deps.repo.save(sessionID, accrue(before, usage.tokens, usage.elapsedSeconds, deps.now()))
+    usage.tokens = emptyDelta()
+    usage.elapsedSeconds = 0
+  }
+
   return {
     async handle(event) {
       const data = event.data ?? {}
@@ -296,8 +319,9 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, an
           const started = stepStartedAt.get(sessionID)
           const elapsed = started === undefined ? 0 : Math.max(0, (deps.now() - started) / 1000)
           stepStartedAt.delete(sessionID)
-          // 只累积、不写库；轮末（或中断）才一次性落账 —— 否则收尾轮（状态已翻成
-          // complete/blocked/budget-limited 之后仍在进行的 step）会被漏记。
+          // 先累加进内存，**每个 step 结束就增量落盘一次**（`flushTurnUsage`）：把最坏丢失
+          // 窗口从「一整轮」压到「一次模型调用」。收尾轮（状态已翻成 complete/blocked/
+          // budget-limited 之后仍在进行的 step）也照记——`touched` 在轮首或本处播种。
           const usage = turnUsage.get(sessionID) ?? { tokens: emptyDelta(), elapsedSeconds: 0, touched: false }
           usage.tokens = addDelta(usage.tokens, delta)
           usage.elapsedSeconds += elapsed
@@ -306,6 +330,7 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, an
             if (goal?.status === "active") usage.touched = true
           }
           turnUsage.set(sessionID, usage)
+          if (usage.touched) await flushTurnUsage(sessionID)
           return
         }
 
@@ -465,9 +490,11 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, an
 
     pendingUsage(sessionID) {
       const usage = turnUsage.get(sessionID)
-      // 只在本轮 token 会归属目标（touched）时叠加：否则展示值会与轮末落盘值不一致
+      // 只在本轮 token 会归属目标（touched）时叠加：否则展示值会与落盘值不一致
       // （paused/complete 目标的普通轮不该把本轮用量算到它头上）。
       if (!usage || !usage.touched) return undefined
+      // step 级落盘后累加器已清零：只有「本步尚未落盘」或「落盘失败待重试」时才非空。
+      if (tokenCost(usage.tokens) <= 0 && usage.elapsedSeconds <= 0) return undefined
       return { tokens: usage.tokens, elapsedSeconds: usage.elapsedSeconds }
     },
 

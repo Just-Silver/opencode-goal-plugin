@@ -130,7 +130,7 @@ describe("createEventRouter", () => {
     expect(goal?.tokensUsed).toBe(167 + 1520)
   })
 
-  test("exposes the in-flight usage while the turn is open, and clears it at turn end", async () => {
+  test("persists each step immediately and leaves nothing pending at turn end", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     const router = makeRouter(deps, { onIdle: async () => false })
@@ -139,15 +139,90 @@ describe("createEventRouter", () => {
       type: "session.step.ended",
       data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 2 } } },
     })
+    // step 级落盘：不用等 execution.succeeded，KV 立刻就有；内存累加器清零 → 无 pending。
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(167)
+    expect(router.pendingUsage("ses_1")).toBeUndefined()
+    await router.handle(executionSucceeded("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(167)
+    expect(router.pendingUsage("ses_1")).toBeUndefined()
+  })
+
+  test("accumulates step by step without double counting across the turn-end write", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    const step = (input: number) => ({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(step(100))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(100)
+    await router.handle(step(20))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(120)
+    // 轮末只写「最后一个 step 之后」的残留（此处为 0），不得把已落盘的再写一遍。
+    await router.handle(executionSucceeded("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(120)
+  })
+
+  test("a step arriving without execution.started (post-reload) still persists for an active goal", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    // 模拟 reload 后新实例接入：没有 started，直接来一个 step.ended。
+    await router.handle({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 2 } } },
+    })
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(167)
+  })
+
+  test("a failed flush keeps the delta for the next write point (no loss, no double count)", async () => {
+    const map = new Map<string, unknown>()
+    const flag = { failNextSet: false }
+    const storage: StorageLike = {
+      async get(key) {
+        return map.get(key)
+      },
+      async set(key, value) {
+        if (flag.failNextSet) {
+          flag.failNextSet = false
+          throw new Error("disk full")
+        }
+        map.set(key, value)
+      },
+      async remove(key) {
+        map.delete(key)
+      },
+      async scan({ prefix }) {
+        return {
+          entries: [...map.entries()].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ key, value })),
+        }
+      },
+    }
+    const deps = { ...makeDeps(), repo: createRepository(storage) }
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const router = makeRouter(deps, { onIdle: async () => false })
+    const step = (input: number) => ({
+      type: "session.step.ended",
+      data: { sessionID: "ses_1", tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    })
+    await router.handle(executionStarted("ses_1"))
+    flag.failNextSet = true
+    await expect(router.handle(step(100))).rejects.toThrow("disk full")
+    // 写失败 → 不清零 → 展示层仍能看到未落盘增量。
     expect(router.pendingUsage("ses_1")?.tokens).toEqual({
       input: 100,
-      output: 10,
-      reasoning: 5,
-      cacheRead: 50,
-      cacheWrite: 2,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
     })
+    // 下一步落盘成功：把欠账一起补上。
+    await router.handle(step(20))
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(120)
     await router.handle(executionSucceeded("ses_1"))
-    expect(router.pendingUsage("ses_1")).toBeUndefined()
+    expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(120)
   })
 
   test("seeds touched at turn start, so a mid-turn external pause still counts", async () => {
@@ -227,7 +302,7 @@ describe("createEventRouter", () => {
     expect(goal?.tokensUsed).toBe(11)
   })
 
-  test("writes the record once per turn, not once per step", async () => {
+  test("writes once per step plus once at turn end (incremental durability)", async () => {
     let writes = 0
     const storage = memoryStorage()
     const counting: StorageLike = {
@@ -247,7 +322,8 @@ describe("createEventRouter", () => {
         data: { sessionID: "ses_1", tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
       })
     await router.handle(executionSucceeded("ses_1"))
-    expect(writes).toBe(2) // 1 次建目标 + 1 次轮末落账（3 个 step 不写）
+    // 1 次建目标 + 3 次 step 增量落盘 + 1 次轮末结算（增量写是「更耐用」的代价：多写但不重复）。
+    expect(writes).toBe(5)
     expect((await deps.repo.load("ses_1"))?.tokensUsed).toBe(6)
   })
 

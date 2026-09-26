@@ -177,7 +177,7 @@ export function applyHostSignal(goal: Goal, now: number, signal: HostSignal): Go
 
 - **续跑触发**：`failed` 分支本就不续跑；本设计只在其上增加「改状态 + 回执」。`succeeded` 分支不动。
 - **空转判定**（`model/empty.ts`）：只对 `active` 生效；状态翻成 usage-limited/blocked 后自然不再计空转。
-- **记账**：`failed` 的结算路径不变（仍轮末一次性落账）。
+- **记账**：`failed` 的结算路径不变（仍在轮末结算残留；轮内已由 step 级增量落盘）。
 - **blocker 机制**（`model/blocked.ts`）：不受影响；host-signal blocked 不写 `blocker*` 字段。
 - **预算**（`model/limits.ts`）：`applyBudget` 升级来源扩展，优先级见 §4.3。
 - **context 注入**（`host/hooks.ts`）：只在 `status === "active"` 注入；usage-limited/blocked 不注入，行为与 paused/blocked 一致。
