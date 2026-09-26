@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import en from "./en"
 import zhCN from "./zh-CN"
-import { MESSAGES, format, formatDuration, messagesFor, statusLabel, type MessageKey } from "./index"
+import { MESSAGES, format, formatDuration, formatTokens, messagesFor, statusLabel, type MessageKey } from "./index"
 
 const placeholders = (value: string): string[] => [...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1] ?? "").sort()
 
@@ -85,6 +85,37 @@ describe("formatDuration", () => {
   test("floors fractions and clamps negatives", () => {
     expect(formatDuration(MESSAGES.en, 59.9)).toBe("59s")
     expect(formatDuration(MESSAGES.en, -5)).toBe("0s")
+  })
+})
+
+describe("formatTokens", () => {
+  test("0 and sub-1000 stay verbatim", () => {
+    expect(formatTokens(0)).toBe("0")
+    expect(formatTokens(7)).toBe("7")
+    expect(formatTokens(500)).toBe("500")
+    expect(formatTokens(999)).toBe("999")
+  })
+
+  test("compacts by magnitude with trimming, no space before the unit", () => {
+    expect(formatTokens(1000)).toBe("1K")
+    expect(formatTokens(1250)).toBe("1.25K")
+    expect(formatTokens(9999)).toBe("10K")
+    expect(formatTokens(12345)).toBe("12.3K")
+    expect(formatTokens(100000)).toBe("100K")
+    expect(formatTokens(1234567)).toBe("1.23M")
+    expect(formatTokens(100000000)).toBe("100M")
+    expect(formatTokens(1500000000)).toBe("1.5B")
+    expect(formatTokens(2000000000000)).toBe("2T")
+  })
+
+  test("never rounds up across a magnitude (no \"1000K\")", () => {
+    expect(formatTokens(999999)).toBe("999K")
+    expect(formatTokens(999999999)).toBe("999M")
+  })
+
+  test("floors fractions and clamps negatives", () => {
+    expect(formatTokens(1500.9)).toBe("1.5K")
+    expect(formatTokens(-5)).toBe("0")
   })
 })
 

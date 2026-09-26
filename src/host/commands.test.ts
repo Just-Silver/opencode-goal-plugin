@@ -392,6 +392,41 @@ describe("budget command", () => {
   })
 })
 
+describe("token display compactness", () => {
+  test("budget receipts and status lines compact large token counts", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      tokensUsed: 12_345_678,
+    })
+
+    await handlers.budget("ses_1", "100000000")
+    expect(notices.at(-1)).toContain("Budget set to 100M")
+
+    await handlers.status("ses_1")
+    expect(notices.at(-1)).toContain("12.3M")
+    expect(notices.at(-1)).toContain("100M")
+  })
+
+  test("an oversized budget names both values compactly", async () => {
+    const deps = { ...makeDeps(), options: { ...DEFAULT_OPTIONS, maxGoalTokenBudget: 100_000_000 } }
+    const { handlers, notices } = runner(deps)
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    await handlers.budget("ses_1", "200000000")
+    expect(notices.at(-1)).toContain("max_goal_token_budget 100M")
+  })
+
+  test("the resume refusal reports used and budget compactly", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...pause(createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 100_000_000 }), 1),
+      tokensUsed: 100_000_000,
+    })
+    await handlers.resume("ses_1")
+    expect(notices.at(-1)).toContain("100M of 100M")
+  })
+})
+
 describe("rebuild command", () => {
   test("empty objective reports usage and a missing goal reports absence, touching no model turn", async () => {
     const { handlers, notices, prompts } = makeHandler()

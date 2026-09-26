@@ -14,5 +14,5 @@ export function messagesFor(language: Language): Messages {
 
 export type { Language } from "./language"
 export type { Messages, MessageKey } from "./messages"
-export { format, formatDuration, statusLabel } from "./messages"
+export { format, formatDuration, formatTokens, statusLabel } from "./messages"
 export { resolveLanguage, systemLocale, toLanguage } from "./language"

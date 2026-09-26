@@ -117,6 +117,30 @@ export function statusLabel(messages: Messages, status: GoalStatus): string {
   }
 }
 
+/**
+ * 展示用的人类可读 token 量：`500` / `1.25K` / `12.3K` / `1.23M` / `100M`。
+ * 0 与不足 1000 显示原值；`≥1000` 按 K/M/B/T 缩，精度随数量级递减（`<10` 两位、`<100` 一位、
+ * 其余整数），并去掉尾随 0；单位中英一致、数字与单位之间无空格。
+ * **纯展示**——模型侧（工具返回、预算提示词）仍用原始整数，见 AGENTS。
+ */
+export function formatTokens(value: number): string {
+  const total = Math.max(0, Math.floor(value))
+  if (total < 1000) return String(total)
+  const [scale, suffix]: [number, string] =
+    total >= 1_000_000_000_000
+      ? [1_000_000_000_000, "T"]
+      : total >= 1_000_000_000
+        ? [1_000_000_000, "B"]
+        : total >= 1_000_000
+          ? [1_000_000, "M"]
+          : [1_000, "K"]
+  const scaled = total / scale
+  const decimals = scaled < 10 ? 2 : scaled < 100 ? 1 : 0
+  // 整数位用 floor 而非四舍五入：避免 999_999 被进位成「1000K」这种跨数量级的丑值。
+  const text = decimals === 0 ? String(Math.floor(scaled)) : String(Number(scaled.toFixed(decimals)))
+  return `${text}${suffix}`
+}
+
 type DurationUnit = "duration.day" | "duration.hour" | "duration.minute" | "duration.second"
 
 /**

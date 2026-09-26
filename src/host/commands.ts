@@ -4,7 +4,7 @@ import { normalizeObjective } from "../model/objective"
 import type { Goal, StopReason } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
-import { format, formatDuration, statusLabel, type Messages } from "../i18n/messages"
+import { format, formatDuration, formatTokens, statusLabel, type Messages } from "../i18n/messages"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
 
@@ -130,8 +130,8 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
       return port.notify(
         sessionID,
         format(deps.messages["notice.resumeBudgetLow"], {
-          used: resumed.tokensUsed,
-          budget: resumed.tokenBudget,
+          used: formatTokens(resumed.tokensUsed),
+          budget: formatTokens(resumed.tokenBudget),
         }),
       )
     await deps.repo.save(sessionID, resumed)
@@ -164,8 +164,8 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
         return port.notify(
           sessionID,
           format(deps.messages["notice.budgetExceedsMax"], {
-            budget: desired ?? 0,
-            max: deps.options.maxGoalTokenBudget ?? 0,
+            budget: formatTokens(desired ?? 0),
+            max: formatTokens(deps.options.maxGoalTokenBudget ?? 0),
           }),
         )
       if (error instanceof GoalError)
@@ -185,7 +185,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     const receipt =
       desired === undefined
         ? format(deps.messages["notice.budgetCleared"], { status })
-        : format(deps.messages["notice.budgetSet"], { budget: desired, status })
+        : format(deps.messages["notice.budgetSet"], { budget: formatTokens(desired), status })
     // 激活结果一并告诉用户（「目标已 active」不等于「已经在跑」）。
     return port.notify(sessionID, activation === undefined ? receipt : `${receipt} ${activationNote(activation)}`)
   }
@@ -238,11 +238,14 @@ function statusLine(goal: Goal, messages: Messages, now: number): string {
   const budget =
     goal.tokenBudget === undefined
       ? messages["status.noBudget"]
-      : format(messages["status.budget"], { budget: goal.tokenBudget })
+      : format(messages["status.budget"], { budget: formatTokens(goal.tokenBudget) })
   // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）。
   const usage = goal.usage && usageIsComplete(goal) ? goal.usage : undefined
   const detail = usage
-    ? format(messages["status.detail"], { cacheRead: usage.cacheRead, newWork: newWorkOf(usage) })
+    ? format(messages["status.detail"], {
+        cacheRead: formatTokens(usage.cacheRead),
+        newWork: formatTokens(newWorkOf(usage)),
+      })
     : ""
   const continuations = format(messages["status.continuations"], { count: goal.continuations ?? 0 })
   const lastError = goal.lastError
@@ -254,7 +257,7 @@ function statusLine(goal: Goal, messages: Messages, now: number): string {
   })
   return format(messages["status.line"], {
     status: statusLabel(messages, goal.status),
-    tokens: goal.tokensUsed,
+    tokens: formatTokens(goal.tokensUsed),
     budget,
     detail,
     created,
