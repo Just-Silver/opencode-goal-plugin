@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-27
+
+### Changed
+
+- **token 记账改为「step 级增量落盘」**：原先只在**轮末**（`session.execution.succeeded/failed/interrupted`）落账，一整轮长 execution 期间用量全悬在内存——`opencode reload` / `opencode plugin update` / service 重启会**永久丢失**（真机实测：一轮 40 分钟、宿主累计约 53M，KV 仍是 0）。现改为**每个 `session.step.ended` 增量落盘一次**（对齐 codex 的 `on_tool_finish`、omp 的 `onToolCompleted`），轮末再结算残留，最坏丢失窗口从「一整轮」降到「一次模型调用」。防重复靠「**写成功后才清零累加器**」（失败则保留、下个写点重试）；宿主串行派发事件，写点不会交错。增量写**只记账**——预算跃迁与停摆回执仍由轮末统一处理，不改停摆语义。`/goal-status` 的显示随之收敛到持久值（`pendingUsage` 清零后不再叠加）。
+
 ## [0.7.0] - 2026-09-27
 
 ### Changed
