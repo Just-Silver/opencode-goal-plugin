@@ -100,23 +100,31 @@ Actions → **Release** → **Run workflow**（`workflow_dispatch`）。它跑�
 
 > ⚠️ 别改回 `npm publish --dry-run`：它仍会向 registry 做「重复版本」校验，当前版本已发布时必炸（`You cannot publish over the previously published versions: x.y.z`，2026-09-26 实测）。
 
-## 4.1 废弃旧版本（`npm deprecate`）：只能人工 2FA
+## 4.1 废弃旧版本（`npm deprecate`）：要人工 2FA，但**不用输验证码**
 
-**结论（2026-09-26 实测）**：`npm deprecate` 属**包管理类操作**，npm 自 2026-08 起不再允许 2FA-bypass 的 granular token 跳过它的 2FA；**Trusted Publishing（OIDC）也没有这个权限**——发布步骤能过，但 deprecate 的 packument `PUT` 会 404（`you do not have permission to access it`）。对照表：
+**结论（2026-09-26 实测）**：`npm deprecate` 属**包管理类操作**。本账号 2FA 模式为 `auth-and-writes`，`.npmrc` 里的 token 不带 bypass 2FA，因此该操作必须过人工 2FA；npm 配置为 `auth-type=web`，走的是**浏览器授权**——**终端里不用输入任何验证码**。
 
 | 方式 | 结果 |
 | --- | --- |
-| 本地 `npm deprecate ...` | `EOTP`：需要一次性口令（浏览器流程或 `--otp=<6位码>`） |
-| CI 走 OIDC（`release.yml`） | 404：OIDC 只覆盖 **publish**（试过，步骤已撤销） |
+| **本地交互式终端**（推荐） | ✅ 打印授权链接（并尝试自动开浏览器）→ 浏览器点一下授权 → 命令继续并成功（实测 0.1.0–0.4.2 全部废弃） |
+| 非交互 shell（无 TTY，agent 常用） | ❌ `EOTP`，且链接在输出里被替换成 `***`，**拿不到可用链接**，无法转给人 |
+| CI 走 OIDC（`release.yml`） | ❌ 404：OIDC 只覆盖 **publish**（试过，撤销该步骤，结论留在 git 历史） |
 | 2FA-bypass GAT | 已失效，见官方 deprecation：<https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/> |
 
-**做法**：由**人在本地**执行（浏览器 2FA，或 `--otp=<6位码>`）：
+**做法**：在**自己的终端**里执行（会打印/打开授权链接，点授权即可；命令会等你在浏览器完成）：
 
 ```bash
-npm deprecate "@justsilver/opencode-goal-plugin@<0.5.0" "旧版：……请升级到 0.5.0+。"
+npm deprecate "@justsilver/opencode-goal-plugin@<0.5.0" "旧版：命令回执会写进会话并进入模型上下文（每条都计费），且预算/用量停摆的回执在轮末永远不会被投递——人和模型都收不到。请升级到 0.5.0+。"
 ```
 
-> 官方对这些「敏感包管理操作」的建议就是改回**交互式 2FA**；Trusted Publishing / 暂存发布只覆盖**发布**这一件事。
+**验证**：逐版本查应都有输出，当前版本应为空：
+
+```bash
+npm view "@justsilver/opencode-goal-plugin@<0.5.0" deprecated
+npm view "@justsilver/opencode-goal-plugin@0.5.0" deprecated   # 应为空
+```
+
+> ⚠️ 别让 agent 在自己的非交互 shell 里跑这条——它只会拿到 `EOTP` + 被屏蔽的链接；`npm login --auth-type=web` 同理，都需要浏览器。
 
 ## 5. 回滚
 
