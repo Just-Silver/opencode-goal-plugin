@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-26
+
+### Changed
+
+- **命令顺序**：会话命令按「主 → 查看 → 修改 → 生命周期 → 调试」排列：`/goal`、`/goal-status`、`/goal-rebuild`、`/goal-budget`、`/goal-pause`、`/goal-resume`、`/goal-clear`、`/goal-debug`。
+
 ## [0.4.0] - 2026-09-26
 
 ### Added

@@ -80,6 +80,16 @@ export default {
         execute: async (input) => handlers.status(input.sessionID),
       })
       editor.add({
+        name: `${name}-rebuild`,
+        description: messages["cmd.rebuild"],
+        execute: async (input) => handlers.rebuild(input.sessionID, input.prompt.text),
+      })
+      editor.add({
+        name: `${name}-budget`,
+        description: messages["cmd.budget"],
+        execute: async (input) => handlers.budget(input.sessionID, input.prompt.text),
+      })
+      editor.add({
         name: `${name}-pause`,
         description: messages["cmd.pause"],
         execute: async (input) => handlers.pause(input.sessionID),
@@ -93,16 +103,6 @@ export default {
         name: `${name}-clear`,
         description: messages["cmd.clear"],
         execute: async (input) => handlers.clear(input.sessionID),
-      })
-      editor.add({
-        name: `${name}-budget`,
-        description: messages["cmd.budget"],
-        execute: async (input) => handlers.budget(input.sessionID, input.prompt.text),
-      })
-      editor.add({
-        name: `${name}-rebuild`,
-        description: messages["cmd.rebuild"],
-        execute: async (input) => handlers.rebuild(input.sessionID, input.prompt.text),
       })
       editor.add({
         name: options.debugCommandName,

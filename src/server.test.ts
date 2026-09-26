@@ -108,11 +108,11 @@ describe("server", () => {
     expect(env.commands.map((command) => command.name)).toEqual([
       "goal",
       "goal-status",
+      "goal-rebuild",
+      "goal-budget",
       "goal-pause",
       "goal-resume",
       "goal-clear",
-      "goal-budget",
-      "goal-rebuild",
       "goal-debug",
     ])
     expect(env.tools[0]?.name).toBe("goal")
