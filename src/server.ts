@@ -160,7 +160,7 @@ export default {
       })
     })
 
-    // 工具：goal(op=...)（业务）；debug=true 时额外注册只读的 goal_debug（默认关，避免污染模型工具表）
+    // 工具：goal(op=...)（业务）；debug=true 时额外注册只读的 goal_debug（默认开，可设 false 保持工具表干净）
     ctx.tool.transform((editor) => {
       const tool = createGoalTool(deps)
       editor.add({
