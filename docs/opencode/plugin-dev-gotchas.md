@@ -28,6 +28,7 @@
 | 14 | `session.deleted` 的 payload **只有 `sessionID`**（不带 `location`） | 归属判定必须**豁免**它：会话已删时回落查询必然失败，否则删除事件被丢弃、KV 记录永久残留 |
 | 15 | 测试里**编造**错误/事件形状 | 会遮住真 bug：我们编了 `{status: 404}`、测试助手还自动补 `location`，155 个测试全绿却漏掉两个真 bug |
 | 16 | 包安装与本地目录的**入口解析路径不同** | git/npm 安装走 `exports`（且按 `files` 过滤，运行时文件必须放进 `src/`）；本地目录走 `<dir>/server`。改入口两边都要照顾 |
+| 17 | 动态内容注入 **system** 会击穿 prompt 缓存 | system 只放生命周期内**逐字节不变**的内容；会变的走 messages / 工具返回 / 命令回执。详见 **`prompt-cache.md`** |
 
 ---
 
@@ -360,3 +361,12 @@ Get-Content $env:TEMP\oc-events.log | ForEach-Object {
 Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -Pattern 'msg="loading plugin"' |
   ForEach-Object { ($_.Line -split '\s+')[0] } | Select-Object -Last 15
 ```
+
+---
+
+## 10. system 注入要护住 prompt 缓存（动态内容别进 system）
+
+- **现象**：把随轮次变化的字段（token 用量、耗时、状态标签…）经 `hook("context")` 注入 system，会**每轮击穿**宿主打在「最后一个 system part」上的缓存断点——从该断点起到最新消息全部按全价重算。
+- **根因（源码核实）**：宿主默认缓存策略 `{ tools, system, messages:{tail:1} }`，system 断点在**第一个和最后一个** part；断点内的缓存键是「从请求开头到断点」，任一字节变即作废。详见 **`prompt-cache.md`**。
+- **正确做法**：system 只放会话/目标生命周期内**逐字节不变**的内容；会变的信息走 messages（工具返回、或 `hook("context")` 里往 `input.messages` 追加）或命令回执。
+- **实测**：未修复版 16 次真实请求 system 哈希**全不同**（唯一差异是 `Tokens used`）；修复后跨 3 轮**逐字节相同**。探针方法与代码见 **`prompt-cache.md`**。

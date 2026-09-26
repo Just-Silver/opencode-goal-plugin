@@ -18,6 +18,7 @@
 ## 想改插件
 
 - **`opencode/plugin-dev-gotchas.md`** —— **v2 插件开发踩坑记录（已验证）**；动插件前先读
+- **`opencode/prompt-cache.md`** —— **prompt 缓存与 system 注入经验**（动态内容别进 system；含源码核实 + 真机实测 + 探针方法）
 - **`opencode/config-install.md`** —— OpenCode 插件「配置安装」方法学（分发方式）
 - **`opencode/known-issues.md`** —— 上游问题跟踪 + 已知坑
 - 仓库根 `CONTRIBUTING.md` —— 本地安装 / 开发 / 真机冒烟
@@ -52,6 +53,7 @@ docs/
     config-install.md               # 配置安装方法学（自研汇总）
     goal-plugins-landscape.md       # OpenCode goal 插件现状
     plugin-dev-gotchas.md           # v2 插件开发踩坑记录（已验证）
+    prompt-cache.md                 # prompt 缓存与 system 注入经验（含实测）
     known-issues.md                 # 上游问题跟踪 + 已知坑
     releasing.md                    # 发布流程
     smoke-checklist.md              # 发布前真机验收清单
