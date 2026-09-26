@@ -3,13 +3,17 @@ import { resolveOptions } from "./config"
 import { createCommandHandlers } from "./host/commands"
 import { createContinuation } from "./host/continuation"
 import { createDebug } from "./host/debug"
+import { GoalRpc } from "./rpc"
 import type { GoalDeps } from "./host/deps"
 import { createEventRouter, type EventLike, type EventRouter } from "./host/events"
 import { acquireGeneration } from "./host/generation"
 import { createCompactionHook, createContextHook } from "./host/hooks"
+import { clampNotice, signalNotice } from "./host/notice"
 import { isRestrictedAgent } from "./host/plan"
 import { createGoalTool } from "./host/tools"
 import { messagesFor, resolveLanguage, systemLocale } from "./i18n"
+import type { StopReason } from "./model/types"
+import { stopWrapUpPrompt } from "./prompts"
 import { createRepository } from "./store/repository"
 import { isMissingSessionError } from "./store/session-exists"
 import { isSessionID } from "./store/keys"
@@ -54,20 +58,62 @@ export default {
       ctx.session
         .synthetic({ sessionID: input.sessionID, text: input.text, description: input.description, resume: true })
         .then(() => undefined)
-    // 纯回执：不唤醒模型，`description` 就是给人看的那一行。
-    const notify = (sessionID: string, text: string) =>
-      ctx.session.synthetic({ sessionID, text, description: text, resume: false }).then(() => undefined)
+    // 纯回执：**不写会话消息**（0 token、不污染模型上下文），改为发 RPC 事件 → TUI 弹窗。
+    // 无 TUI / RPC 不可用时静默（操作已生效）。见规格 §5/§7。
+    const noticeRegistration = await ctx.rpc.register(GoalRpc, {}).catch((error) => {
+      console.error("opencode-goal: rpc register failed", error)
+      return undefined
+    })
+    // 命令回执：toast（RPC 事件 → TUI，不进模型、0 token，见规格 §16）。
+    const notify = async (sessionID: string, text: string) => {
+      if (!noticeRegistration) return
+      try {
+        await noticeRegistration.events.emit("notice", {
+          sessionID,
+          title: messages["notice.title"],
+          message: clampNotice(text, messages),
+        })
+      } catch (error) {
+        console.error("opencode-goal: notice emit failed", error)
+      }
+    }
+
+    // 目标停摆回执（预算命中 / 用量受限 / 受阻）：走**合成消息 + `resume: true`**。
+    // 必须唤醒：`resume: false` 只是把消息塞进收件箱，而停摆发生在轮末（忙期已 settle，没有 drain 再来
+    // 投递它）→ 转录不建行、模型读不到，等于没发。唤醒的代价是一轮模型调用，所以 `text` 明确要求收尾
+    // （prompts.stopWrapUpPrompt），让这一轮不是白跑；`description` 才是给人看、会留在转录里的那一行。
+    const announce = (sessionID: string, input: { reason: StopReason; message: string }) =>
+      ctx.session
+        .synthetic({
+          sessionID,
+          text: stopWrapUpPrompt(input.reason),
+          description: signalNotice(messages, input.reason, input.message),
+          resume: true,
+        })
+        .then(() => undefined)
 
     // 事件路由先建：命令/工具/调试视图都要引用它。
     const continuation = createContinuation(deps, { deliver })
-    const router = createEventRouter(deps, continuation, notify)
+    const router = createEventRouter(deps, continuation, announce)
     routerRef = router
     const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
 
+    // 恢复/解锁后的「激活」：**只在会话空闲时**投递一轮续跑。
+    // 会话在跑时投递会被宿主当成 steer 插进当前轮（不是我们要的效果），而它本轮末自然会续。
+    const activate = async (sessionID: string): Promise<"delivered" | "busy" | "skipped"> => {
+      if (router.isRunning(sessionID)) return "busy"
+      const agent = await ctx.session
+        .get({ sessionID })
+        .then((session) => session.agent)
+        .catch(() => undefined)
+      if (agent === undefined) return "skipped"
+      return (await continuation.onIdle(sessionID, agent)) ? "delivered" : "skipped"
+    }
+
     // 命令：`/goal <目标>` 转发给模型；状态控制是**独立命令**（宿主没有子命令概念，
-    // 后台拦截保留名会让用户打错一个字就变成目标文字）。状态控制命令不唤醒模型；但回执仍经 synthetic 落一条消息进历史。
+    // 后台拦截保留名会让用户打错一个字就变成目标文字）。状态控制命令不唤醒模型，回执经 `notify` 走 TUI toast（不写会话消息）。
     ctx.command.transform((editor) => {
-      const handlers = createCommandHandlers(deps, { deliver, notify })
+      const handlers = createCommandHandlers(deps, { deliver, notify, announce, activate })
       const name = options.commandName
       editor.add({
         name,
@@ -197,6 +243,7 @@ export default {
 
     return () => {
       generation.release()
+      void noticeRegistration?.dispose()
     }
   },
 } satisfies Plugin.Plugin

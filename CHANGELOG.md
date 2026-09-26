@@ -2,11 +2,33 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.5.0] - 2026-09-26
+
+### Added
+
+- **停摆回执真正送达（人和模型都看得到）**：预算命中 / 用量受限 / 受阻时，写入一条会话内**合成回执**并**唤醒一轮收尾**——`description` 是本地化的一行（落转录、不会像 toast 那样自动消失，人回来还在），`text` 是给模型的收尾指令（新增 `prompts.stopWrapUpPrompt`：只做简短总结、不调工具、不改目标状态）。真机实测两条路径均通过：命令路径（`/goal-budget` 设到已用量之下）与自然路径（轮末结算时自然越界），都是「出现回执 → 恰好一轮收尾 → 之后不再续跑」。
+
+- **`/goal-resume` 与 `/goal-budget` 恢复时真正激活模型**：此前这两个命令只翻状态、**不唤醒**——目标会停在「状态是 active 却没人跑」，而 `/goal-resume` 又因「无需恢复」拒绝，形成死路。现在恢复/解锁后立刻投递一轮续跑（复用续跑通道：计数、受限 agent 判定、一行触发语），并有两条保护：
+  - **只在会话空闲时激活**：会话正在跑时不插队——否则续跑触发会被宿主当成 steer 插进当前轮；此时改为在本轮结束后自然续跑。
+  - **预算不够就不恢复**：`已用 ≥ 预算` 时 `/goal-resume` **拒绝**并提示改用 `/goal-budget` 提高预算（恢复了下一轮末也会被 `applyBudget` 打回 budget-limited，只会骗用户说「已恢复」）。
+  - **回执说清激活结果**（已开始续跑 / 会话正在运行将在本轮末续跑 / 未自动续跑），不会只给模型提示。
+
+### Changed
+
+- **停摆回执由 `resume: false` 改为 `resume: true`**：`resume: false` 的合成消息**永远不会被投递**——转录里的消息行是「投递」时才建的，而停摆发生在轮末（忙期已 settle、没有 drain 再来投递它），于是人和模型**都收不到**任何提示。代价是停摆后**多一轮**收尾；已用收尾指令让这一轮有意义。详见 `docs/opencode/plugin-dev-gotchas.md` §11。
+- **命令回执改为 TUI toast（0 token）**：`/goal-status`、`/goal-pause`、`/goal-resume`、`/goal-clear`、`/goal-budget`、`/goal-rebuild`、`/goal-debug` 的回执不再写入会话消息（此前每条都会留在历史里、被模型读到并计费），改为经 **RPC 事件**推给 TUI **toast**（只提示你正看着的那个会话对应的窗口；超长正文在服务端截断）。命令名与行为不变；**无 TUI 时命令静默执行**（能力不变、不报错）。`/goal <目标>` 行为不变（仍驱动模型）。插件新增 TUI 入口（`exports["./tui"]`），随包自动加载，无需改配置。
+- **预算用尽的指引从 `/goal-resume` 改为 `/goal-budget`**：`signal.budget-limited` 的回执不再提示 `/goal-resume`（新门槛会拒绝它），改为「可用 /goal-budget 提高预算后继续」。
+
+### Fixed
+
+- **预算用尽不再静默**：预算命中此前**没有任何回执**（模型直接停、用户不知原因）——此前只有「宿主信号」路径会发 `usage-limited` / `blocked`。现在预算命中跃迁也会发一次停摆回执，且只在跃迁时发一次；`applyHostSignal` 对已是终态的目标是 no-op，不会形成通知/续跑循环。
 
 ### 文档
 
-- 澄清「命令回执」的真实成本：所有命令输出都经 `session.synthetic` 落一条消息进会话历史，下一轮仍会被模型读到并计费——`resume: false` 只是**不唤醒模型**（不额外开一轮），并非"零 token / 不注入模型上下文"。相应修正 `CONTRIBUTING.md`、`docs/opencode/prompt-cache.md`、`docs/opencode/plugin-dev-gotchas.md`、`docs/opencode/smoke-checklist.md` 与源码注释。
+- 新增 `docs/opencode/plugin-dev-gotchas.md` §11：`session.synthetic` 的 `resume: false` 为何「永远送不出去」（四层源码事实 + 真机实测）。
+- 修正「命令回执会进模型上下文」的过时说法（`CONTRIBUTING.md`、`prompt-cache.md`、`plugin-dev-gotchas.md`、`smoke-checklist.md`、源码注释）：命令回执现在走 toast，不进上下文。
+- 速查表补充：`opencode pair` 已不再打印口令（改为一次性连接链接），`opencode api` 自带鉴权可直接打后台 service——`scripts/smoke-api.mjs` 的鉴权解析因此暂时失效（已记为待办）。
+- `README.md` 更新命令表与行为说明：`/goal-resume` / `/goal-budget` 的激活语义、预算不够时的拒绝、停摆回执留在转录里。
 
 ## [0.4.2] - 2026-09-26
 

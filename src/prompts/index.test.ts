@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { blockedWrapUp, budgetLimitPrompt, compactionSnapshot, continuationTrigger, goalCommandPrompt, goalContext, xmlEscape } from "./index"
+import { blockedWrapUp, budgetLimitPrompt, compactionSnapshot, continuationTrigger, goalCommandPrompt, goalContext, stopWrapUpPrompt, xmlEscape } from "./index"
 import { createGoal } from "../model/goal"
 
 const goal = createGoal({ goalId: "g1", objective: "ship <it> & verify", now: 0, tokenBudget: 500 })
@@ -72,5 +72,14 @@ describe("other templates", () => {
     const text = goalCommandPrompt("build the thing")
     expect(text).toContain("build the thing")
     expect(text).toContain("goal")
+  })
+
+  test("stopWrapUpPrompt names the reason, forbids more work, and forbids tool calls", () => {
+    const budget = stopWrapUpPrompt("budget-limited")
+    expect(budget).toContain("token budget")
+    expect(budget).toContain("Do not continue the task")
+    expect(budget).toContain("Do not call any tools")
+    expect(stopWrapUpPrompt("usage-limited")).toContain("usage or quota limit")
+    expect(stopWrapUpPrompt("blocked")).toContain("rejected the request")
   })
 })

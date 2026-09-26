@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-goal-plugin",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "type": "module",
   "description": "Codex/OMP-style persistent goals for OpenCode V2: /goal command + goal tool + idle auto-continuation + evidence-based completion + blocked/budget guards",
   "license": "MIT",
@@ -27,12 +27,15 @@
   "main": "./src/server.ts",
   "exports": {
     ".": "./src/server.ts",
-    "./server": "./src/server.ts"
+    "./server": "./src/server.ts",
+    "./tui": "./src/tui.ts",
+    "./rpc": "./src/rpc.ts"
   },
   "files": [
     "src/**/*.ts",
     "!src/**/*.test.ts",
     "server.ts",
+    "tui.ts",
     "CHANGELOG.md"
   ],
   "publishConfig": {

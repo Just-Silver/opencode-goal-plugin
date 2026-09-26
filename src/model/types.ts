@@ -1,5 +1,11 @@
 export type GoalStatus = "active" | "paused" | "blocked" | "budget-limited" | "usage-limited" | "complete"
 
+/**
+ * 目标「停摆」的三种状态：插件不再自动续跑，必须由人或外部状态改变才能继续。
+ * 停摆回执（`announce`）用它同时决定「给人看的一行」和「给模型的收尾提示词」。
+ */
+export type StopReason = Extract<GoalStatus, "budget-limited" | "usage-limited" | "blocked">
+
 /** 累计 token 分项（0.1.1 起记录；旧记录可能没有）。`tokensUsed` = 五项之和。 */
 export interface GoalUsage {
   readonly input: number

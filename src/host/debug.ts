@@ -16,7 +16,7 @@ export interface Debug {
 export const DEBUG_OPS = ["env", "events", "sessions", "state"] as const
 
 /**
- * 注意：这些文本最终走 `session.synthetic` 的 `description`，而 TUI 的 notice 行是
+ * 注意：这些文本最终经 `notify` → RPC 事件 → TUI **toast**（宿主 `toast.tsx`），而 toast 是
  * **纯文本渲染、不解析 Markdown**（`###`、`| 表格 |` 会原样显示，很难看）。
  * 所以这里一律输出裸文本，不要用 Markdown 语法。
  */
@@ -130,8 +130,8 @@ async function renderState(
 }
 
 /**
- * `/goal-debug` 的确定性入口：只读、不唤醒模型；**但仍会落一条消息进历史**（故输出必须短）。
- * 输出保持**短**且为纯文本：命令的唯一出口是往会话插一条消息，会留在历史里。
+ * `/goal-debug` 的确定性入口：只读、不唤醒模型；输出经 `notify` → RPC 事件 → TUI toast 显示，
+ * **不落会话消息**。toast 没有滚动，超长会被 `clampNotice` 截断，所以这里保持**短**且为纯文本。
  */
 export function createDebug(deps: GoalDeps, source: DebugSource): Debug {
   return {

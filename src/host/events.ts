@@ -4,10 +4,9 @@ import { pause } from "../model/goal"
 import { applyBudget } from "../model/limits"
 import { applyHostSignal, hostSignal } from "../model/signals"
 import { accrue, addDelta, emptyDelta, type TokenDelta } from "../model/usage"
-import type { Goal } from "../model/types"
+import type { Goal, StopReason } from "../model/types"
 import type { Continuation } from "./continuation"
 import type { GoalDeps } from "./deps"
-import { signalNotice } from "./notice"
 import { createTurnTracker, type TurnTracker } from "./turn"
 
 export interface EventLike {
@@ -50,10 +49,21 @@ export interface EventRouter {
   diagnostics(): DebugSnapshot
   /** 轮内尚未落账的用量（只读；工具/命令展示用，不参与业务判定）。 */
   pendingUsage(sessionID: string): { tokens: TokenDelta; elapsedSeconds: number } | undefined
+  /**
+   * 该会话当前是否有**本插件可见的**进行中的轮。`/goal-resume` 用它保证「只在空闲时激活」——
+   * 会话在跑时投递续跑会被宿主当成 steer 插进当前轮，那不是我们想要的。
+   */
+  isRunning(sessionID: string): boolean
 }
 
-/** 纯回执出口：把一行提示显示给用户（不唤醒模型）。 */
-export type Notify = (sessionID: string, text: string) => Promise<void>
+/**
+ * 目标停摆回执出口：预算命中 / 用量受限 / 受阻时，告诉**人和模型**目标为什么停了。
+ * 调用方只给「原因 + 可选的宿主错误消息」，具体文案由实现层组装（人看的走 i18n、模型看的走 prompts）。
+ *
+ * 实现侧必须 `resume: true`：`resume: false` 的合成消息只会躺在收件箱里等投递，而停摆发生在
+ * 轮末（忙期已 settle，没有 drain 再来捞它）→ 转录不建行、模型读不到，等于没发。
+ */
+export type Announce = (sessionID: string, input: { reason: StopReason; message: string }) => Promise<void>
 
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
@@ -87,7 +97,7 @@ const TRACKED_TYPES = new Set([
 ])
 const DEBUG_EVENT_LIMIT = 50
 
-export function createEventRouter(deps: GoalDeps, continuation: Continuation, notify: Notify): EventRouter {
+export function createEventRouter(deps: GoalDeps, continuation: Continuation, announce: Announce): EventRouter {
   const agents = new Map<string, string>()
   const pendingAutomatic = new Set<string>()
   const blockedThisTurn = new Map<string, boolean>()
@@ -211,10 +221,15 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, no
   }
 
   const save = async (sessionID: string, mutate: (goal: Goal, now: number) => Goal): Promise<void> => {
-    const goal = await deps.repo.load(sessionID)
-    if (!goal) return
+    const before = await deps.repo.load(sessionID)
+    if (!before) return
     const now = deps.now()
-    await deps.repo.save(sessionID, applyBudget(mutate(goal, now), now))
+    const after = applyBudget(mutate(before, now), now)
+    await deps.repo.save(sessionID, after)
+    // 预算命中是**插件自己判的**（宿主不会为此发 `session.execution.failed`），此前这条路径没有任何回执
+    // → 真机表现为「模型突然静默」。这里补一次停摆回执：人和模型都看得到目标为什么停了。
+    if (before.status !== "budget-limited" && after.status === "budget-limited")
+      await announce(sessionID, { reason: "budget-limited", message: "" })
   }
 
   return {
@@ -403,12 +418,10 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, no
           await save(sessionID, (goal, now) => applyHostSignal(goal, now, signal))
           const after = await deps.repo.load(sessionID)
           const next = after?.status
-          if (
-            after &&
-            next !== before.status &&
-            (next === "usage-limited" || next === "budget-limited" || next === "blocked")
-          )
-            await notify(sessionID, signalNotice(deps.messages, next, signal.message))
+          // budget-limited 由 `save` 在预算命中时统一通知（含「信号落 usage-limited 后升级为 budget-limited」），
+          // 这里只补宿主信号直接造成的 usage-limited / blocked，避免同一停摆通知两次。
+          if (after && next !== before.status && (next === "usage-limited" || next === "blocked"))
+            await announce(sessionID, { reason: next, message: signal.message })
           return
         }
 
@@ -456,6 +469,10 @@ export function createEventRouter(deps: GoalDeps, continuation: Continuation, no
       // （paused/complete 目标的普通轮不该把本轮用量算到它头上）。
       if (!usage || !usage.touched) return undefined
       return { tokens: usage.tokens, elapsedSeconds: usage.elapsedSeconds }
+    },
+
+    isRunning(sessionID) {
+      return turnOpen.has(sessionID)
     },
 
     diagnostics() {

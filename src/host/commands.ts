@@ -1,7 +1,7 @@
 import { GoalError, pause as pauseGoal, rebuild as rebuildGoal, resume as resumeGoal } from "../model/goal"
 import { setBudget } from "../model/limits"
 import { normalizeObjective } from "../model/objective"
-import type { Goal } from "../model/types"
+import type { Goal, StopReason } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
 import { format, statusLabel, type Messages } from "../i18n/messages"
@@ -48,8 +48,16 @@ export function parseBudgetArg(text: string): BudgetArg {
 export interface CommandPort {
   /** 触发一次模型轮（转发目标文本）。走 synthetic，TUI 只显示 `description` 一行。 */
   readonly deliver: (input: { sessionID: string; text: string; description: string }) => Promise<void>
-  /** 不唤醒模型地显示给用户（status/pause/resume/clear 的回执）；仍落一条 synthetic 消息进历史，下轮模型可见、占 token。 */
+  /** 把回执显示给用户（status/pause/resume/clear）；实现为发 RPC 事件 → TUI toast（不写会话消息、0 token）。 */
   readonly notify: (sessionID: string, text: string) => Promise<void>
+  /** 目标停摆回执（预算命中）：走会话合成消息 —— `description` 给人看（落转录、不会消失）、`text` 要求模型收尾并唤醒一轮，人和模型都看得到。 */
+  readonly announce: (sessionID: string, input: { reason: StopReason; message: string }) => Promise<void>
+  /**
+   * 恢复/解锁后的「激活」：**只在会话空闲时**投递一轮续跑（复用续跑通道：计数、受限 agent 判定、一行触发语）。
+   * 会话在跑时投递会被宿主当成 steer 插进当前轮，所以必须避开。
+   * 返回 `delivered`（已投递）/ `busy`（会话正在跑，会在轮末自然续跑）/ `skipped`（无可用 agent 或受限 agent）。
+   */
+  readonly activate: (sessionID: string) => Promise<"delivered" | "busy" | "skipped">
 }
 
 export interface CommandInput {
@@ -60,20 +68,28 @@ export interface CommandInput {
 export interface GoalCommandHandlers {
   /** `/goal <目标>`：空参报告状态，其余转发给模型。 */
   readonly goal: (input: CommandInput) => Promise<void>
-  /** `<name>-status`：服务端确定性报告（不唤醒模型；回执仍入历史）。 */
+  /** `<name>-status`：服务端确定性报告（不唤醒模型；回执走 TUI toast，不写会话消息）。 */
   readonly status: (sessionID: string) => Promise<void>
   readonly pause: (sessionID: string) => Promise<void>
   readonly resume: (sessionID: string) => Promise<void>
   readonly clear: (sessionID: string) => Promise<void>
-  /** `${name}-budget`：不唤醒模型地改/清空当前目标的预算（回执仍入历史）。 */
+  /** `${name}-budget`：不唤醒模型地改/清空当前目标的预算（回执走 TUI toast）。 */
   readonly budget: (sessionID: string, text: string) => Promise<void>
-  /** `${name}-rebuild`：不唤醒模型地替换当前目标的正文（状态、预算与全部记账原样保留；回执仍入历史）。 */
+  /** `${name}-rebuild`：不唤醒模型地替换当前目标的正文（状态、预算与全部记账原样保留；回执走 TUI toast）。 */
   readonly rebuild: (sessionID: string, text: string) => Promise<void>
 }
 
 /** 命令面的确定性入口：全部不唤醒模型、零歧义；只有 `/goal <目标>` 会转发给模型。
- * 注意「不唤醒」≠「零成本」：回执经 synthetic 落一条消息进会话历史，后续轮次会带上它（占 token）。 */
+ * 回执经 RPC 事件推给 TUI toast（不写会话消息、0 token）；无 TUI 时静默。 */
 export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCommandHandlers {
+  /** 激活结果 → 一句给用户的补充：让他知道目标到底有没有真的跑起来（「已恢复」不等于「在跑」）。 */
+  const activationNote = (activation: "delivered" | "busy" | "skipped"): string =>
+    activation === "delivered"
+      ? deps.messages["notice.activated"]
+      : activation === "busy"
+        ? deps.messages["notice.activatedBusy"]
+        : deps.messages["notice.activatedSkipped"]
+
   const status = async (sessionID: string): Promise<void> => {
     const existing = await deps.repo.load(sessionID)
     await port.notify(
@@ -108,8 +124,21 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
         format(deps.messages["notice.nothingToResume"], { status: statusLabel(deps.messages, existing.status) }),
       )
     }
+    // 预算不够就不恢复：恢复了下一轮末也会被 `applyBudget` 打回 budget-limited（白跑一轮），
+    // 只会让用户以为「恢复成功了」。直接告诉用户该怎么继续。
+    if (resumed.tokenBudget !== undefined && resumed.tokensUsed >= resumed.tokenBudget)
+      return port.notify(
+        sessionID,
+        format(deps.messages["notice.resumeBudgetLow"], {
+          used: resumed.tokensUsed,
+          budget: resumed.tokenBudget,
+        }),
+      )
     await deps.repo.save(sessionID, resumed)
-    return port.notify(sessionID, deps.messages["notice.resumed"])
+    // 激活：只在会话空闲时投递一轮续跑（在跑的话本轮末自然会续，不用插队）。
+    // 回执必须说清「到底有没有真的跑起来」——「已恢复」不等于「在跑」。
+    const activation = await port.activate(sessionID)
+    return port.notify(sessionID, `${deps.messages["notice.resumed"]} ${activationNote(activation)}`)
   }
 
   const clear = async (sessionID: string): Promise<void> => {
@@ -144,13 +173,21 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
       throw error
     }
     await deps.repo.save(sessionID, goal)
+    // 新预算低于已用量 → 目标当场进入 budget-limited。补一条**停摆回执**：合成消息 + 唤醒一轮收尾，
+    // 否则只有一条会自动消失的命令回执 toast，人和模型都不知道目标已经停了。
+    if (existing.status !== "budget-limited" && goal.status === "budget-limited")
+      await port.announce(sessionID, { reason: "budget-limited", message: "" })
+    // 预算改大后目标会自动回 active（`model/limits.ts` 的 `setBudget`）——此时也要激活一次，
+    // 否则会出现「状态是 active 却没人跑」，而 `/goal-resume` 又会因「无需恢复」拒绝，形成死路。
+    const activation =
+      existing.status !== "active" && goal.status === "active" ? await port.activate(sessionID) : undefined
     const status = statusLabel(deps.messages, goal.status)
-    return port.notify(
-      sessionID,
+    const receipt =
       desired === undefined
         ? format(deps.messages["notice.budgetCleared"], { status })
-        : format(deps.messages["notice.budgetSet"], { budget: desired, status }),
-    )
+        : format(deps.messages["notice.budgetSet"], { budget: desired, status })
+    // 激活结果一并告诉用户（「目标已 active」不等于「已经在跑」）。
+    return port.notify(sessionID, activation === undefined ? receipt : `${receipt} ${activationNote(activation)}`)
   }
 
   const rebuild = async (sessionID: string, text: string): Promise<void> => {

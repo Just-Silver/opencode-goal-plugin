@@ -6,6 +6,7 @@ import { createRepository, type StorageLike } from "../store/repository"
 import { createContinuation, type Continuation } from "./continuation"
 import { createEventRouter } from "./events"
 import type { GoalDeps } from "./deps"
+import { signalNotice } from "./notice"
 
 function memoryStorage(): StorageLike {
   const map = new Map<string, unknown>()
@@ -43,15 +44,19 @@ function makeDeps(): GoalDeps {
 /**
  * 模拟真实事件流：带 location 的事件标上本 location。事件自带 location 时以它为准
  * （`...event` 在 `location` 之后，所以显式传入的 location 会覆盖），便于测试跨 location 忽略。
+ *
+ * 停摆回执：路由层只传「原因 + 宿主错误消息」，给人看的文案由实现层组装（`server.ts`）；
+ * 这里按同样方式组装，断言才有意义（也顺带覆盖 reason → 文案 的映射）。
  */
 function makeRouter(deps: GoalDeps, continuation: Continuation, notices: string[] = []) {
-  const inner = createEventRouter(deps, continuation, async (_sessionID, text) => {
-    notices.push(text)
+  const inner = createEventRouter(deps, continuation, async (_sessionID, input) => {
+    notices.push(signalNotice(deps.messages, input.reason, input.message))
   })
   return {
     handle: (event: { type: string; data?: Record<string, unknown>; location?: { directory?: unknown } }) =>
       inner.handle({ location: { directory: deps.locationDirectory }, ...event }),
     pendingUsage: (sessionID: string) => inner.pendingUsage(sessionID),
+    isRunning: (sessionID: string) => inner.isRunning(sessionID),
     diagnostics: () => inner.diagnostics(),
   }
 }
@@ -597,6 +602,23 @@ describe("createEventRouter", () => {
     await router.handle({ type: "session.execution.started", data: { sessionID: "ses_1" } })
     await router.handle({ type: "session.execution.succeeded", data: { sessionID: "ses_1" } })
     expect(injected).toBe(0)
+  })
+
+  test("hitting the budget announces the stop once, through the persisted notice", async () => {
+    const deps = makeDeps()
+    const notices: string[] = []
+    const router = makeRouter(deps, { onIdle: async () => false }, notices)
+    await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), tokenBudget: 0 })
+    await router.handle({ type: "session.agent.selected", data: { sessionID: "ses_1", agent: "build" } })
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect((await deps.repo.load("ses_1"))?.status).toBe("budget-limited")
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain("budget-limited")
+    // 已是 budget-limited 后再成轮不再重复回执
+    await router.handle(executionStarted("ses_1"))
+    await router.handle(executionSucceeded("ses_1"))
+    expect(notices).toHaveLength(1)
   })
 
   test("a running background shell defers continuation", async () => {

@@ -44,6 +44,9 @@ function runner(deps: GoalDeps) {
   const prompts: string[] = []
   const descriptions: string[] = []
   const notices: string[] = []
+  const announcements: Array<{ reason: string; message: string }> = []
+  const activations: string[] = []
+  let activation: "delivered" | "busy" | "skipped" = "delivered"
   const handlers = createCommandHandlers(deps, {
     deliver: async (input) => {
       prompts.push(input.text)
@@ -52,8 +55,25 @@ function runner(deps: GoalDeps) {
     notify: async (_sessionID, text) => {
       notices.push(text)
     },
+    announce: async (_sessionID, input) => {
+      announcements.push(input)
+    },
+    activate: async (sessionID) => {
+      activations.push(sessionID)
+      return activation
+    },
   })
-  return { handlers, prompts, descriptions, notices }
+  return {
+    handlers,
+    prompts,
+    descriptions,
+    notices,
+    announcements,
+    activations,
+    setActivation: (next: "delivered" | "busy" | "skipped") => {
+      activation = next
+    },
+  }
 }
 
 function makeDeps(): GoalDeps {
@@ -120,13 +140,41 @@ describe("createCommandHandlers", () => {
   })
 
   test("pause and resume are handled deterministically", async () => {
-    const { deps, handlers, notices } = makeHandler()
+    const { deps, handlers, notices, activations } = makeHandler()
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     await handlers.pause("ses_1")
     expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
     await handlers.resume("ses_1")
     expect((await deps.repo.load("ses_1"))?.status).toBe("active")
     expect(notices.some((line) => line.includes("paused"))).toBe(true)
+    // 恢复必须**真的激活**（空闲 → 投递一轮续跑），不能只翻状态。
+    expect(activations).toEqual(["ses_1"])
+  })
+
+  test("resume refuses when the budget is already exhausted, and points at /goal-budget", async () => {
+    const { deps, handlers, notices, activations } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1),
+      tokenBudget: 100,
+      tokensUsed: 100,
+    })
+    await handlers.resume("ses_1")
+    // 不恢复：恢复了下一轮末也会被 applyBudget 打回 budget-limited（白跑一轮），还会骗用户说「已恢复」。
+    expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
+    expect(activations).toEqual([])
+    expect(notices.at(-1)).toContain("/goal-budget")
+    expect(notices.at(-1)).toContain("100")
+  })
+
+  test("a running session is not steered: the receipt says it continues at turn end", async () => {
+    const { deps, handlers, notices, activations, setActivation } = makeHandler()
+    await deps.repo.save("ses_1", pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1))
+    setActivation("busy")
+    await handlers.resume("ses_1")
+    expect((await deps.repo.load("ses_1"))?.status).toBe("active")
+    // 仍然问了端口（由它判定空闲），但端口回报在跑 → 不插队投递。
+    expect(activations).toEqual(["ses_1"])
+    expect(notices.at(-1)).toContain("running")
   })
 
   test("clear removes the record", async () => {
@@ -268,7 +316,7 @@ describe("budget command", () => {
   })
 
   test("raising the budget resumes a budget-limited goal, and the receipt says so", async () => {
-    const { deps, handlers, notices } = makeHandler()
+    const { deps, handlers, notices, activations } = makeHandler()
     await deps.repo.save("ses_1", {
       ...createGoal({ goalId: "g1", objective: "o", now: 0, tokenBudget: 10 }),
       status: "budget-limited" as const,
@@ -277,6 +325,25 @@ describe("budget command", () => {
     await handlers.budget("ses_1", "500")
     expect((await deps.repo.load("ses_1"))?.status).toBe("active")
     expect(notices.at(-1)).toContain("active")
+    // 「目标已 active」不等于「已经在跑」——回执必须把激活结果一并告诉用户。
+    expect(notices.at(-1)).toContain("Auto-continue started")
+    // 预算改大后回 active → 必须同时激活，否则会出现「状态是 active 却没人跑」，
+    // 而 `/goal-resume` 又会因「无需恢复」拒绝（死路）。
+    expect(activations).toEqual(["ses_1"])
+  })
+
+  test("a budget below what was already used announces the stop through the session notice", async () => {
+    const { deps, handlers, notices, announcements } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      tokensUsed: 100,
+    })
+    await handlers.budget("ses_1", "10")
+    expect((await deps.repo.load("ses_1"))?.status).toBe("budget-limited")
+    // 停摆回执：路由层只传「原因」，文案（人看的 + 模型收尾）由实现层组装，并唤醒一轮。
+    expect(announcements).toEqual([{ reason: "budget-limited", message: "" }])
+    // ……命令回执仍走 toast。
+    expect(notices.at(-1)).toContain("budget-limited")
   })
 
   test("rejects a budget above maxGoalTokenBudget with a dedicated notice", async () => {

@@ -10,12 +10,18 @@ export interface Messages {
   readonly "cmd.debug": string
   readonly "cmd.budget": string
   readonly "cmd.rebuild": string
+  readonly "notice.title": string
+  readonly "notice.truncated": string
   readonly "notice.noGoal": string
   readonly "notice.paused": string
   readonly "notice.resumed": string
   readonly "notice.cleared": string
   readonly "notice.nothingToPause": string
   readonly "notice.nothingToResume": string
+  readonly "notice.resumeBudgetLow": string
+  readonly "notice.activated": string
+  readonly "notice.activatedBusy": string
+  readonly "notice.activatedSkipped": string
   readonly "notice.budgetSet": string
   readonly "notice.budgetCleared": string
   readonly "notice.budgetUsage": string

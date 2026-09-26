@@ -21,6 +21,7 @@ function mockCtx(get: () => Promise<unknown>) {
   const tools: Array<{ name: string; options?: { codemode?: boolean } }> = []
   const hooks: string[] = []
   const synthetic: Array<Record<string, unknown>> = []
+  const notices: Array<{ name: string; data: Record<string, unknown> }> = []
   const storage = {
     async get(key: string) {
       return store.get(key)
@@ -71,8 +72,18 @@ function mockCtx(get: () => Promise<unknown>) {
     event: {
       subscribe: () => (async function* () {})(),
     },
+    rpc: {
+      register: async () => ({
+        dispose: async () => {},
+        events: {
+          emit: async (name: string, data: Record<string, unknown>) => {
+            notices.push({ name, data })
+          },
+        },
+      }),
+    },
   }
-  return { store, removed, commands, tools, hooks, synthetic, ctx }
+  return { store, removed, commands, tools, hooks, synthetic, notices, ctx }
 }
 
 const missing = async (): Promise<unknown> => {
@@ -169,7 +180,7 @@ describe("server", () => {
     if (typeof cleanup === "function") await cleanup()
   })
 
-  test("the status command notifies without waking a model turn", async () => {
+  test("the status command notifies via an RPC event and writes no session message", async () => {
     const env = mockCtx(missing)
     const cleanup = await plugin.setup(env.ctx as never)
     const command = env.commands.find((item) => item.name === "goal-status")
@@ -177,11 +188,12 @@ describe("server", () => {
 
     await command!.execute({ sessionID: "ses_1", prompt: { text: "" } })
 
-    expect(env.synthetic).toHaveLength(1)
-    expect(env.synthetic[0]).toMatchObject({ sessionID: "ses_1", resume: false })
-    expect(env.synthetic[0]?.resume).toBe(false)
-    // TUI 只渲染 description；漏传会让命令回执变成空白通知行。
-    expect(env.synthetic[0]?.description).toBe(env.synthetic[0]?.text)
+    // 回执走 RPC 事件 → TUI 弹窗；0 token（不写会话消息）。
+    expect(env.notices).toHaveLength(1)
+    expect(env.notices[0]?.name).toBe("notice")
+    expect(env.notices[0]?.data).toMatchObject({ sessionID: "ses_1", title: "Goal" })
+    expect(String(env.notices[0]?.data.message)).toContain("No goal")
+    expect(env.synthetic).toHaveLength(0)
 
     if (typeof cleanup === "function") await cleanup()
   })
@@ -203,6 +215,30 @@ describe("server", () => {
     if (typeof cleanup === "function") await cleanup()
   })
 
+  test("a stop notice is a resuming synthetic: localized line for the human, wrap-up prompt for the model", async () => {
+    const env = mockCtx(missing)
+    const cleanup = await plugin.setup(env.ctx as never)
+    const command = env.commands.find((item) => item.name === "goal-budget")
+    expect(command?.name).toBe("goal-budget")
+    // 目标已用量远超新预算 → 设预算当场 budget-limited → 触发停摆回执。
+    env.store.set("goal:ses_1", { ...ORPHAN, tokensUsed: 100 })
+
+    await command!.execute({ sessionID: "ses_1", prompt: { text: "10" } })
+
+    expect(env.synthetic).toHaveLength(1)
+    const stop = env.synthetic[0] as { text?: string; description?: string; resume?: boolean }
+    // **必须唤醒**：`resume: false` 的合成消息只会躺在收件箱里（转录不建行、模型读不到），
+    // 真机表现就是「预算到了，人和模型都不知道」。
+    expect(stop.resume).toBe(true)
+    // 人看的是本地化的一行（落转录、不会像 toast 那样消失）；预算用尽要指向 `/goal-budget`（不是 resume）。
+    expect(stop.description).toBe("Goal marked budget-limited. Raise it with /goal-budget to continue.")
+    // 模型看的是收尾指令，不是那句「怎么恢复」的话。
+    expect(stop.text).toContain("Do not call any tools")
+    expect(stop.text).not.toContain("/goal-budget")
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
   test("the debug command reports its rendered output to the transcript", async () => {
     const env = mockCtx(missing)
     const cleanup = await plugin.setup(env.ctx as never)
@@ -211,11 +247,10 @@ describe("server", () => {
 
     await command!.execute({ sessionID: "ses_1", prompt: { text: "env" } })
 
-    expect(env.synthetic).toHaveLength(1)
-    const notice = env.synthetic[0] as { text?: string; description?: string; resume?: boolean }
-    expect(notice.resume).toBe(false)
-    expect(notice.text).toContain("debug env")
-    expect(notice.description).toBe(notice.text)
+    expect(env.notices).toHaveLength(1)
+    expect(env.notices[0]?.name).toBe("notice")
+    expect(String(env.notices[0]?.data.message)).toContain("debug env")
+    expect(env.synthetic).toHaveLength(0)
 
     if (typeof cleanup === "function") await cleanup()
   })

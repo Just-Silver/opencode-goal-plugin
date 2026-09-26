@@ -19,16 +19,19 @@
 | 5 | 插件目标必须是**目录** | 指向文件会被 `configured plugin path must be a directory` 丢弃 |
 | 6 | `opencode plugin list` 不能作「加载成功」判据 | 它读后台 service 缓存（2026-09-25 实测：**会**列出配置的包插件与版本），但「没列出 / 列了」都不代表本次热重载成功——看日志 entrypoint |
 | 7 | `Bun.resolveSync` 缓存负面结果 | 同进程内「先探测失败 → 再建文件」仍失败 |
-| 8 | `ctx.session.synthetic` 必须 `resume: false` | 否则确定性子命令会白唤醒一轮模型；但 `false` 只是**不唤醒**，回执**仍落一条消息进历史**（占后续 token） |
+| 8 | `session.synthetic` 只在**投递**时才落转录、才进模型；`resume: false` **不唤醒 → 终态下永不送达** | 命令回执别走 synthetic（走 RPC toast，0 token）；必须让人和模型看到时用 `resume: true`（代价一轮）。详见 §11 |
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
 | 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
-| 11 | 命令回执**人看不到** | 命令没有返回通道；给人看必须传 `synthetic` 的 **`description`**（`text` 只给模型） |
+| 11 | 命令回执**没有返回通道** | 给人看走 **RPC 事件 → TUI toast**（0 token、不进模型）；要**留痕**（人回来还能看到）才用 `synthetic` 的 **`description`**（`text` 只给模型） |
 | 12 | 目标上下文**刷屏 + 历史膨胀** | 目标本体走 `hook("context")` 进 **system**（不落消息、不进转录）；驱动模型只发**一行**（`prompt` / `synthetic` 都能唤醒） |
 | 13 | 插件 API 抛的是 `Schema.TaggedError`，**没有 HTTP `status`** | 判「会话是否还在」要认 `_tag`（`Session.NotFoundError`）；按 `status === 404` 判**永远不成立**，清理逻辑会静默失效 |
 | 14 | `session.deleted` 的 payload **只有 `sessionID`**（不带 `location`） | 归属判定必须**豁免**它：会话已删时回落查询必然失败，否则删除事件被丢弃、KV 记录永久残留 |
 | 15 | 测试里**编造**错误/事件形状 | 会遮住真 bug：我们编了 `{status: 404}`、测试助手还自动补 `location`，155 个测试全绿却漏掉两个真 bug |
 | 16 | 包安装与本地目录的**入口解析路径不同** | git/npm 安装走 `exports`（且按 `files` 过滤，运行时文件必须放进 `src/`）；本地目录走 `<dir>/server`。改入口两边都要照顾 |
-| 17 | 动态内容注入 **system** 会击穿 prompt 缓存 | system 只放生命周期内**逐字节不变**的内容；会变的走 messages（工具返回 / 命令回执——**二者都进模型上下文**，只是不进 system）。详见 **`prompt-cache.md`** |
+| 17 | 动态内容注入 **system** 会击穿 prompt 缓存 | system 只放生命周期内**逐字节不变**的内容；会变的走 messages（工具返回、续跑/停摆**合成消息**——都进模型上下文，只是不进 system）。**命令回执**走 toast，不进上下文。详见 **`prompt-cache.md`** |
+| 18 | RPC 事件回调是**包装对象** | payload 在 **`event.data`**（`RpcEventPayload = { type: "rpc.<id>.<name>", data: {…} }`）；直接读 `event.message` 得到 `undefined`（2026-09-26 真机踩坑） |
+| 19 | 配置安装的包，TUI 入口会被**自动纳入加载** | server 清单里 `features.tui === true` 的包，TUI **无需写 `cli.json`** 即加载其 `exports["./tui"]`；本地目录插件找 `<dir>/tui.ts(x)`（2026-09-26 真机实测） |
+| 20 | `ui.dialog.alert` **不可滚、不按会话过滤**；`ui.toast` 也不可滚 | alert 正文是普通 `<text>`、容器无 scrollbox（`ui/dialog-alert.tsx`）；两者都是**客户端全局**，而 RPC 事件会广播到同一 location 下**所有** TUI 客户端 → 必须自己按 `ui.router.current()` + `data.session.root()` 过滤。toast 没有 `maxHeight`，超长会超屏被硬裁（2026-09-26 真机实测） |
 
 ---
 
@@ -141,7 +144,7 @@ async function belongsToThisLocation(sessionID: string) {
 - 「看到 loading 日志」**不足以**证明加载成功——loading 在**加载开始**时打印，失败发生在其后，会额外记 `WARN failed to load plugin`。
 - 插件的 `console.log` / `console.error` **不会**进 `opencode.log`；要观察内部状态就用 `/goal-debug`（或写一条全局 storage key）。
 - **命令「定义」不注入模型上下文**（源码证据：`Command.Service` 只在 `session/command.ts`（执行）、`plugin/host.ts`（插件 API）、`plugin/internal.ts`（注册）出现，`session/system-prompt.ts` 里没有任何命令清单，命令菜单也不占工具表）；**工具定义会注入**（name + description + input schema 都进模型上下文）。所以「给 agent 自主诊断」的入口只能是工具，「给人随手查」的入口用命令最干净。
-  - ⚠️ 但**命令执行时的回执会注入**：所有命令输出都经 `synthetic` 落一条消息进历史（见 §6），下一轮以 `[Synthetic context]` 出现。所以「命令零上下文成本」是错觉——它只是**不进 system、不占工具表、不唤醒模型**，但**回执文本照样计费**，越短越好。
+  - ✅ **命令回执不进模型上下文**：现在的命令回执走 **RPC 事件 → TUI toast**（`ui.toast.show`；不写会话消息、0 token）。此前那种「命令输出经 `synthetic` 落历史、下轮以 `[Synthetic context]` 出现并计费」的做法已废弃——它既占 token，在**终态**下还会送不出去（见 §11）。
 - 验证多个实例：`/goal-debug env` 看本实例 location；跨实例集合可用全局 storage 临时登记（实测本机同时加载 **3 个** location 实例。具体目录属机器相关，仓库内不记录）。
 - 命令/工具的输出**必须传 `synthetic` 的 `description`** 人才看得见（只给 `text` 会变成一行空白通知），见 §6。
 
@@ -242,7 +245,7 @@ async function belongsToThisLocation(sessionID: string) {
 ## 5. 其它已验证的约束
 
 - **`ctx.session.synthetic` 必须 `resume: false`**：否则确定性命令（如 `/goal-status`）会唤醒一轮模型。出处：`packages/core/src/plugin/plan.ts` 同样用法。
-  - 注意：`resume: false` **只表示不唤醒**，消息仍会落进会话历史、下一轮被模型读到（见 §6）——它是"不额外开一轮"，不是"零 token"。
+  - 注意：`resume: false` **既不唤醒、也永不送达**——合成消息的转录行与模型输入都发生在**投递**时，而没人唤醒就没有投递（见 §11）。需要送达就用 `resume: true`（代价一轮）。
 - **续跑 agent 未知时保守跳过**，绝不回退成 `"build"`（否则会把受限 agent 放行）。
 - **`session.execution.interrupted` → `paused`**（宿主给定信号，非启发式）。
 - **`.gitignore` 别用 Visual Studio 模板**：其 NuGet 规则 `**/[Pp]ackages/*` 会静默吞掉 `docs/**/sources/packages/**` 归档（本项目曾因此漏提交 44 个文件）。TS/Bun 项目用 `Node` 模板。
@@ -273,9 +276,9 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 ```
 `InlineToolLabel` 带 `flexWrap="wrap"`（`packages/tui/src/routes/session/message-parts.tsx`），所以 notice 行会**换行**显示长文本；Markdown 表格不渲染，是等宽纯文本（调试够用）。
 
-**没有"只给人看、不进模型"的出口**：synthetic 的 `text` 会留在模型上下文里（下一轮以 `[Synthetic context]` 出现）。介意污染就改用**工具**——工具结果由 agent 转述，且只在被调用时产生。
+**`synthetic` 没有"只给人看、不进模型"的出口**：投递后 `text` 会留在模型上下文里（下一轮以 `[Synthetic context]` 出现）。介意污染就改用**工具**（结果由 agent 转述）或**命令面 toast**（0 token、不进模型）。
 
-> 推论：**每条命令回执都会增加后续 token**（并让 messages 的 tail 断点移到它身上）。所以回执要短：`/goal-debug` 输出保持一行、`statusLine` 别塞无关字段。这也解释了为什么「命令零 token」的说法只在不唤醒模型的意义上成立。
+> 推论：**合成消息（续跑触发 / 停摆回执）会增加后续 token**，并让 messages 的 tail 断点移到它身上，所以要短。命令回执走 toast，不在此列（真正的 0 token）。
 
 **怎么验证**：TUI 里敲 `/goal-debug env`，应出现 `◈` 开头、可换行的诊断文本；`bun test` 里 `server.test.ts` 断言了 `synthetic[0].description === synthetic[0].text`。
 
@@ -347,13 +350,15 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 ## 9. 复核用命令速查
 
 ```powershell
-# 后台 service 端点与口令
+# 一次性连接链接（**不再打印口令**；要给浏览器/App 用）
 opencode pair
 
-# 当前 location 的插件列表（含 source/features/state）
+# 直接打后台 service（**自带鉴权，不需要口令**；看接口：`opencode api GET /openapi.json`）
 opencode api GET /api/plugin
+opencode api session.message.list --param sessionID=ses_xxx
+opencode api session.command --param sessionID=ses_xxx -d '{"name":"goal-budget","text":"10"}'
 
-# 抓真实事件流
+# 抓真实事件流（SSE，需要 Basic 口令 —— 而 pair 已不再给口令，见下方「待办」）
 curl.exe -N -s -u "opencode:<Password>" "http://127.0.0.1:<port>/api/event" --max-time 60 > $env:TEMP\oc-events.log
 
 # 事件类型统计
@@ -366,6 +371,8 @@ Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -P
   ForEach-Object { ($_.Line -split '\s+')[0] } | Select-Object -Last 15
 ```
 
+> **待办（2026-09-26 发现）**：`opencode pair` 的输出已改为「一次性连接链接」，**不再打印 `Password`**，因此 `scripts/smoke-api.mjs` 的 `resolveServer()` 解析失效（冒烟脚本当前跑不起来）。`opencode api` 不受影响（自带鉴权）。修法二选一：让冒烟脚本改用 `opencode api` 发请求，或找到 SSE 所需的 Basic 口令来源。
+
 ---
 
 ## 10. system 注入要护住 prompt 缓存（动态内容别进 system）
@@ -374,3 +381,18 @@ Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -P
 - **根因（源码核实）**：宿主默认缓存策略 `{ tools, system, messages:{tail:1} }`，system 断点在**第一个和最后一个** part；断点内的缓存键是「从请求开头到断点」，任一字节变即作废。详见 **`prompt-cache.md`**。
 - **正确做法**：system 只放会话/目标生命周期内**逐字节不变**的内容；会变的信息走 messages（工具返回、或 `hook("context")` 里往 `input.messages` 追加）或命令回执。
 - **实测**：未修复版 16 次真实请求 system 哈希**全不同**（唯一差异是 `Tokens used`）；修复后跨 3 轮**逐字节相同**。探针方法与代码见 **`prompt-cache.md`**。
+
+---
+
+## 11. `session.synthetic` 加 `resume: false` 会让消息**永远送不出去**（停摆回执踩过）
+
+- **现象**：用 `session.synthetic({ text, description, resume: false })` 发停摆回执（预算命中 / 用量受限 / 受阻）后，**人和模型都看不到**：转录里没有那一行，模型下一轮上下文里也没有。
+- **根因（源码核实，四层叠加）**：
+  1. 合成消息的**转录行是「投递」时才建的**：`InboxEnqueued` → `projectAdmitted` 只写 inbox 表；`InboxDelivered` → 才建 `synthetic` 消息行（`core/src/session/projector.ts`）。
+  2. `resume: false` **不唤醒**会话（`core/src/session/session.ts` 的 `Session.synthetic`：只有 `input.resume !== false` 才 `execution.wake`）→ 没有任何东西来投递。
+  3. 轮末 `session.execution.succeeded` 是在**整个忙期 settle 之后**才发的（`core/src/session/execution.ts` 的 `settled`：注释 "One terminal observation per busy period"）→ **发停摆回执那一刻 drain 已退出**，不会再来捞这条 inbox 行。
+  4. 时间线**只渲染 `type:"user"` 的 pending 项**（`app/src/session/timeline/controller-projection.ts` 的 `visibleTimelineMessages`）→ synthetic 的 pending 行**完全不可见**。
+- **后果**：终态下这不是"延迟送达"，而是**永不送达**（只有下次有人发言才会被顺带投递，但那时已无意义）。
+- **正确做法**：需要让人/模型看到时用 **`resume: true`**——自己制造一次投递，代价是**一轮模型调用**。既然付了这一轮，就把 `text` 写成**收尾指令**（`src/prompts` 的 `stopWrapUpPrompt`，不本地化），而不是把给人看的文案塞给它；`description` 才是给人看、留在转录里的那一行（本地化，走 `src/i18n`）。
+- **顺带**：`/goal-status` 之类的**命令回执**不要走合成消息（会喂给模型、每轮计费）；走 RPC 事件 → TUI toast。
+- **实测（2026-09-26）**：`resume: true` 后两条路径都在真机通过——命令路径（预算设到已用量之下）与自然路径（轮末结算自然越界），均为「转录出现回执 + **恰好一轮**收尾 + 之后无续跑」。

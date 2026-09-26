@@ -1,4 +1,4 @@
-import type { Goal } from "../model/types"
+import type { Goal, StopReason } from "../model/types"
 
 export function xmlEscape(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -117,4 +117,21 @@ Call goal with op "create" only when the user explicitly asked for a goal. Do no
 
 export function blockedWrapUp(goal: Goal): string {
   return `The same blocker has persisted for ${goal.blockerStreak} consecutive goal turns (key: ${goal.blockerKey ?? "unknown"}), so the goal is now marked "blocked". Stop goal work and give the user a concise summary: what is blocking, what you already tried, and exactly what you need from the user or the external state to continue. Do not call goal with op "complete".`
+}
+
+/**
+ * 停摆回执的**模型侧**文案：目标停摆（预算命中 / 用量受限 / 受阻）后，`announce` 用 `resume: true`
+ * 唤醒的那一次**收尾轮**携带的指令。让这一轮不是白跑。
+ *
+ * 模型提示词不本地化（见 AGENTS.md），所以不放进 `src/i18n/`。
+ */
+export function stopWrapUpPrompt(reason: StopReason): string {
+  const why: Record<StopReason, string> = {
+    "budget-limited": "it reached its token budget",
+    "usage-limited": "the model provider reported a usage or quota limit",
+    blocked: "the model provider rejected the request (authentication, content filter, or invalid request)",
+  }
+  return `The active goal has stopped because ${why[reason]}.
+
+Do not continue the task and do not start new work for the goal in this turn. Reply with a brief wrap-up only: what was accomplished, what remains, and the single clearest next step for the user. Do not call any tools, and do not change the goal state.`
 }

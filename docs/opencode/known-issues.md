@@ -154,3 +154,30 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 > 「后台任务（background subagent / shell）运行期间不应自动续跑」已于 V2 子项目 2 实现（见 `CHANGELOG.md` 的 `[0.2.0]`）。
 > 「宿主信号 → 状态（`provider.quota` → `usage-limited`；宿主终态错误 → `blocked`）」已于 V2 子项目 3 实现（见 `CHANGELOG.md` 的 `[0.2.0]`）。
 > 「国际化（i18n）」已于 V2 实现（见 `CHANGELOG.md` 的 `[0.2.0]`）。默认跟随系统 locale，可用 `language` 覆盖。
+
+---
+
+## 上游功能请求（待提 issue）
+
+### [ ] 插件缺少「只发给用户看、不进模型上下文」的输出通道
+
+**状态**：已定位，待本插件 TUI 改造全部完成后，向 opencode 提 feature request。
+
+**现象**：服务端插件要让**用户**看到一行反馈（命令回执、状态展示），唯一出口是 `ctx.session.synthetic(...)`。但这条消息的 `text` **必然进入模型上下文**（下一轮以 `[Synthetic context]` 出现），即使 `resume: false` 也一样。`description` 虽然只用于 TUI 显示，却**无法单独发送**——即"给用户看"与"喂给模型"被绑在同一条消息上。
+
+**证据（本机 `@opencode/plugin` 2.0.16 / `@opencode/schema` / `@opencode/client` 类型）**：
+
+- `SessionSyntheticInput = { sessionID; text: string; description?: string; …; resume?: boolean }` —— `text` **必填**（无最短长度限制，但不可省略）。
+- `SessionMessage.Synthetic = { text: Schema.String; description?: Schema.String; … }` —— `text` 必填。
+- `to-llm-message`：`case "synthetic": return [{ role: "user", content: message.text }]` ⇒ `text` 进模型。
+- 服务端命令 `CommandDefinition.execute` 返回 `Promise<void>`（**无返回值通道**）；服务端 `Context` **没有** `ui.*`（`ui.toast` / `ui.dialog` 属 TUI 插件）。
+
+**影响**：任何"确定性命令 / 纯 UI 回执"都被迫写入模型上下文——用户为**纯界面信息**付 token，并**污染模型上下文与思维链**。本插件因此被迫把全部命令回执改为 TUI 界面通道（见规格 `docs/superpowers/specs/2026-09-26-opencode-goal-v2-tui-zero-token-display-design.md`）。
+
+**请求（issue 正文要点）**：提供一种「只面向用户、不进模型上下文」的输出通道。候选方案：
+
+1. `synthetic` 的 `text` 改为**可选**：仅给 `description` 时，该消息**不进 LLM 上下文**（仅转录显示）。
+2. 新增服务端可用通道，如 `ctx.session.notice(...)` / `ctx.ui.toast(...)`（等价于 TUI 的 `ui.toast`，但不落库、不进模型）。
+3. `CommandDefinition.execute` 支持返回一段"仅显示、不进模型"的文本。
+
+**验证**：用探针钩 `http.request` 抓发往 provider 的请求体；执行一条命令后，`messages` 应**无新增**，而 TUI 仍显示回执。
