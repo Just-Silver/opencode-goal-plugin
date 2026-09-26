@@ -225,6 +225,30 @@ describe("createCommandHandlers", () => {
     expect(notices[0]).toContain("cache read 50")
   })
 
+  test("status renders elapsed time as a human-readable duration, not raw seconds", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      timeUsedSeconds: 7500,
+    })
+    await handlers.status("ses_1")
+    expect(notices[0]).toContain("ran for 2h 5m")
+    expect(notices[0]).not.toContain("7500s")
+    expect(notices[0]).not.toContain("{duration}")
+  })
+
+  test("an empty /goal and /goal-status render the same status line", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      timeUsedSeconds: 7500,
+    })
+    await handlers.status("ses_1")
+    const viaCommand = notices.at(-1)
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: "   " } })
+    expect(notices.at(-1)).toBe(viaCommand)
+  })
+
   test("a storage error while resuming propagates instead of being reported as not-resumable", async () => {
     const stored = pause(createGoal({ goalId: "g1", objective: "o", now: 0 }), 1)
     const repo: Repository = {

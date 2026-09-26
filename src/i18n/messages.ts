@@ -45,6 +45,11 @@ export interface Messages {
   readonly "status.continuations": string
   readonly "status.detail": string
   readonly "status.lastError": string
+  readonly "duration.day": string
+  readonly "duration.hour": string
+  readonly "duration.minute": string
+  readonly "duration.second": string
+  readonly "duration.join": string
   readonly "signal.usage-limited": string
   readonly "signal.budget-limited": string
   readonly "signal.detail": string
@@ -110,4 +115,29 @@ export function statusLabel(messages: Messages, status: GoalStatus): string {
     case "complete":
       return messages["status.complete"]
   }
+}
+
+type DurationUnit = "duration.day" | "duration.hour" | "duration.minute" | "duration.second"
+
+/**
+ * 展示用的人类可读时长：最多两级单位（`45s` / `12m 30s` / `5h 30m` / `2d 3h`），
+ * 低位为 0 时省略；单位与连接符由目录本地化（英文带空格、中文不带）。
+ * **纯展示**——模型侧（工具返回、预算提示词）仍用原始整数秒，见 AGENTS。
+ */
+export function formatDuration(messages: Messages, seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const unit = (value: number, suffix: DurationUnit): string => `${value}${messages[suffix]}`
+  const join = (first: string, second?: string): string =>
+    second === undefined ? first : format(messages["duration.join"], { first, second })
+  if (total < 60) return unit(total, "duration.second")
+  if (total < 3600) {
+    const rest = total % 60
+    return join(unit(Math.floor(total / 60), "duration.minute"), rest > 0 ? unit(rest, "duration.second") : undefined)
+  }
+  if (total < 86400) {
+    const rest = Math.floor((total % 3600) / 60)
+    return join(unit(Math.floor(total / 3600), "duration.hour"), rest > 0 ? unit(rest, "duration.minute") : undefined)
+  }
+  const rest = Math.floor((total % 86400) / 3600)
+  return join(unit(Math.floor(total / 86400), "duration.day"), rest > 0 ? unit(rest, "duration.hour") : undefined)
 }

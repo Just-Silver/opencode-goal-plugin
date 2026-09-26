@@ -4,7 +4,7 @@ import { normalizeObjective } from "../model/objective"
 import type { Goal, StopReason } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
-import { format, statusLabel, type Messages } from "../i18n/messages"
+import { format, formatDuration, statusLabel, type Messages } from "../i18n/messages"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
 
@@ -249,7 +249,7 @@ function statusLine(goal: Goal, messages: Messages): string {
     budget,
     detail,
     created,
-    seconds: goal.timeUsedSeconds,
+    duration: formatDuration(messages, goal.timeUsedSeconds),
     lastError,
     continuations,
     objective: goal.objective,

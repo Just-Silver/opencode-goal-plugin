@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import en from "./en"
 import zhCN from "./zh-CN"
-import { MESSAGES, format, messagesFor, statusLabel, type MessageKey } from "./index"
+import { MESSAGES, format, formatDuration, messagesFor, statusLabel, type MessageKey } from "./index"
 
 const placeholders = (value: string): string[] => [...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1] ?? "").sort()
 
@@ -60,6 +60,31 @@ describe("statusLabel", () => {
     expect(statusLabel(MESSAGES.en, "active")).toBe("active")
     expect(statusLabel(MESSAGES["zh-CN"], "active")).toBe("进行中")
     expect(statusLabel(MESSAGES["zh-CN"], "usage-limited")).toBe("用量受限")
+  })
+})
+
+describe("formatDuration", () => {
+  test("human-readable, at most two units, zero low-order unit dropped", () => {
+    expect(formatDuration(MESSAGES.en, 0)).toBe("0s")
+    expect(formatDuration(MESSAGES.en, 45)).toBe("45s")
+    expect(formatDuration(MESSAGES.en, 60)).toBe("1m")
+    expect(formatDuration(MESSAGES.en, 750)).toBe("12m 30s")
+    expect(formatDuration(MESSAGES.en, 3600)).toBe("1h")
+    expect(formatDuration(MESSAGES.en, 7500)).toBe("2h 5m")
+    expect(formatDuration(MESSAGES.en, 90000)).toBe("1d 1h")
+  })
+
+  test("localizes the units and the joiner", () => {
+    expect(formatDuration(MESSAGES["zh-CN"], 45)).toBe("45秒")
+    expect(formatDuration(MESSAGES["zh-CN"], 750)).toBe("12分30秒")
+    expect(formatDuration(MESSAGES["zh-CN"], 7500)).toBe("2小时5分")
+    expect(formatDuration(MESSAGES["zh-CN"], 90000)).toBe("1天1小时")
+    expect(formatDuration(MESSAGES["zh-CN"], 86400)).toBe("1天")
+  })
+
+  test("floors fractions and clamps negatives", () => {
+    expect(formatDuration(MESSAGES.en, 59.9)).toBe("59s")
+    expect(formatDuration(MESSAGES.en, -5)).toBe("0s")
   })
 })
 
