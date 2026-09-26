@@ -96,7 +96,27 @@ CD 会：跑测试与类型检查 → 校验 `tag == package.json == CHANGELOG` 
 
 ## 4. 预检（不发布）
 
-Actions → **Release** → **Run workflow**（`workflow_dispatch`）。它跑完整流程但发布步骤只执行 `npm publish --dry-run`，且**不建 Release** ⇒ 可以在正式打 tag 前验证打包内容与版本一致性。
+Actions → **Release** → **Run workflow**（`workflow_dispatch`）。它跑完整流程但发布步骤只执行 `npm pack --dry-run`，且**不建 Release** ⇒ 可以在正式打 tag 前验证打包内容与版本一致性。
+
+> ⚠️ 别改回 `npm publish --dry-run`：它仍会向 registry 做「重复版本」校验，当前版本已发布时必炸（`You cannot publish over the previously published versions: x.y.z`，2026-09-26 实测）。
+
+## 4.1 废弃旧版本（`npm deprecate`）：只能人工 2FA
+
+**结论（2026-09-26 实测）**：`npm deprecate` 属**包管理类操作**，npm 自 2026-08 起不再允许 2FA-bypass 的 granular token 跳过它的 2FA；**Trusted Publishing（OIDC）也没有这个权限**——发布步骤能过，但 deprecate 的 packument `PUT` 会 404（`you do not have permission to access it`）。对照表：
+
+| 方式 | 结果 |
+| --- | --- |
+| 本地 `npm deprecate ...` | `EOTP`：需要一次性口令（浏览器流程或 `--otp=<6位码>`） |
+| CI 走 OIDC（`release.yml`） | 404：OIDC 只覆盖 **publish**（试过，步骤已撤销） |
+| 2FA-bypass GAT | 已失效，见官方 deprecation：<https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/> |
+
+**做法**：由**人在本地**执行（浏览器 2FA，或 `--otp=<6位码>`）：
+
+```bash
+npm deprecate "@justsilver/opencode-goal-plugin@<0.5.0" "旧版：……请升级到 0.5.0+。"
+```
+
+> 官方对这些「敏感包管理操作」的建议就是改回**交互式 2FA**；Trusted Publishing / 暂存发布只覆盖**发布**这一件事。
 
 ## 5. 回滚
 

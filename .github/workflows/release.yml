@@ -6,15 +6,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      deprecate:
-        description: '可选：要废弃的版本范围（如 <0.5.0）。留空则只做预检，不废弃。'
-        required: false
-        type: string
-      message:
-        description: '可选：废弃说明（npm deprecate 的 message）。'
-        required: false
-        type: string
 
 # 发布不可并行：排队串行，不取消
 concurrency:
@@ -74,15 +65,6 @@ jobs:
             exit 0
           fi
           npm publish
-      # 废弃历史版本：只能从 CI 走——npm 自 2026-08 起，2FA-bypass 的 granular token
-      # 不能再对「包管理类操作」（deprecate 属此类）跳过 2FA，本地 `npm deprecate --otp` 之外
-      # 唯一不需要人工 2FA 的通道就是本工作流的 Trusted Publishing（OIDC）。
-      - name: Deprecate old versions (dispatch only)
-        if: github.event_name == 'workflow_dispatch' && inputs.deprecate != ''
-        env:
-          RANGE: ${{ inputs.deprecate }}
-          MESSAGE: ${{ inputs.message }}
-        run: npm deprecate "$(node -p "require('./package.json').name")@$RANGE" "$MESSAGE"
       - name: Create or update GitHub Release
         if: github.event_name == 'push'
         env:
