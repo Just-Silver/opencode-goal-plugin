@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **system 提示词缓存稳定**：目标注入不再包含每轮变化的用量数字与状态行——`goalContext` 去掉 `Budget:` 块与 `Status:` 行，`compactionSnapshot` 去掉 `Budget:` 块。目标 `active` 期间注入 system 的文本因此逐字节恒定，使宿主 prompt cache 的「最后一个 system 断点」跨轮命中（此前每轮首个请求都会因 `Tokens used` 变化而使该断点失效）。用量与状态仍可在 `/goal-status`（零 token、不唤醒模型）与 `goal(op="get")` 查看；预算耗尽的收尾提示 `budgetLimitPrompt` 不受影响。
+
 ### 注意
 
 - **命令顺序只影响服务端列表**：命令的注册顺序（0.4.1 起为 `/goal`、`/goal-status`、`/goal-rebuild`、`/goal-budget`、`/goal-pause`、`/goal-resume`、`/goal-clear`、`/goal-debug`）决定 `command.list` 的返回顺序；`/` 菜单的显示顺序由宿主 TUI 决定（空输入按字母序，输入后按模糊匹配排序），插件无法控制。

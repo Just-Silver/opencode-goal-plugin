@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { blockedWrapUp, budgetLimitPrompt, continuationTrigger, goalCommandPrompt, goalContext, xmlEscape } from "./index"
+import { blockedWrapUp, budgetLimitPrompt, compactionSnapshot, continuationTrigger, goalCommandPrompt, goalContext, xmlEscape } from "./index"
 import { createGoal } from "../model/goal"
 
 const goal = createGoal({ goalId: "g1", objective: "ship <it> & verify", now: 0, tokenBudget: 500 })
@@ -11,14 +11,16 @@ describe("xmlEscape", () => {
 })
 
 describe("goalContext", () => {
-  test("carries the escaped objective, status, budget, and the completion audit", () => {
+  test("carries the escaped objective and the completion audit, without volatile status/budget lines", () => {
     const text = goalContext(goal, { maxObjectiveChars: 4000 })
     expect(text).toContain("&lt;it&gt; &amp; verify")
-    expect(text).toContain("Status: active")
-    expect(text).toContain("Token budget: 500")
     expect(text).toContain("Completion audit")
     expect(text).toContain('op "complete"')
     expect(text).toContain('"budget"')
+    expect(text).not.toContain("Status:")
+    expect(text).not.toContain("Tokens used")
+    expect(text).not.toContain("Tokens remaining")
+    expect(text).not.toContain("Token budget")
   })
 
   test("truncates a long objective and points at the get op", () => {
@@ -29,9 +31,21 @@ describe("goalContext", () => {
     expect(text).toContain('op "get"')
   })
 
-  test("reports the current status so a non-active goal is never silently continued", () => {
-    const paused = { ...goal, status: "paused" as const }
-    expect(goalContext(paused, { maxObjectiveChars: 4000 })).toContain("Status: paused")
+  test("is byte-identical when only volatile counters change (prompt-cache stability)", () => {
+    const later = { ...goal, tokensUsed: 247365, timeUsedSeconds: 40, continuations: 7 }
+    expect(goalContext(later, { maxObjectiveChars: 4000 })).toBe(goalContext(goal, { maxObjectiveChars: 4000 }))
+  })
+})
+
+describe("compactionSnapshot", () => {
+  test("keeps status and objective but omits volatile budget lines", () => {
+    const text = compactionSnapshot(goal, { maxObjectiveChars: 4000 })
+    expect(text).toContain("<goal_snapshot>")
+    expect(text).toContain("Status: active")
+    expect(text).toContain("&lt;it&gt; &amp; verify")
+    expect(text).not.toContain("Tokens used")
+    expect(text).not.toContain("Tokens remaining")
+    expect(text).not.toContain("Token budget")
   })
 })
 
