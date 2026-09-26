@@ -225,16 +225,29 @@ describe("createCommandHandlers", () => {
     expect(notices[0]).toContain("cache read 50")
   })
 
-  test("status renders elapsed time as a human-readable duration, not raw seconds", async () => {
+  test("status renders the active work time as a human-readable duration, not raw seconds", async () => {
     const { deps, handlers, notices } = makeHandler()
     await deps.repo.save("ses_1", {
       ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
       timeUsedSeconds: 7500,
     })
     await handlers.status("ses_1")
-    expect(notices[0]).toContain("ran for 2h 5m")
+    expect(notices[0]).toContain("active work 2h 5m")
     expect(notices[0]).not.toContain("7500s")
     expect(notices[0]).not.toContain("{duration}")
+  })
+
+  test("status distinguishes wall-clock elapsed (now − createdAt) from active work time", async () => {
+    const repo = createRepository(memoryStorage())
+    // createdAt = 0；now = 2 天 → 墙钟「已过 2d」，而工作时长仍是 7500s = 2h 5m。
+    await repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      timeUsedSeconds: 7500,
+    })
+    const { handlers, notices } = runner({ ...makeDeps(), repo, now: () => 2 * 86400 * 1000 })
+    await handlers.status("ses_1")
+    expect(notices[0]).toContain("(2d ago)")
+    expect(notices[0]).toContain("active work 2h 5m")
   })
 
   test("an empty /goal and /goal-status render the same status line", async () => {

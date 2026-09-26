@@ -95,7 +95,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     await port.notify(
       sessionID,
       existing
-        ? statusLine(withPending(existing, deps.pendingUsage?.(sessionID)), deps.messages)
+        ? statusLine(withPending(existing, deps.pendingUsage?.(sessionID)), deps.messages, deps.now())
         : deps.messages["notice.noGoal"],
     )
   }
@@ -228,7 +228,13 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
   }
 }
 
-function statusLine(goal: Goal, messages: Messages): string {
+/**
+ * 状态行同时展示两个不同口径的时间：
+ * - 「已过」= `now − createdAt`（自然流逝，暂停/空闲也在涨）；
+ * - 「有效工作」= `timeUsedSeconds`（逐轮累加的活动时长，只在真跑轮时增长）。
+ * `now`/`createdAt` 是毫秒，换算成秒后交给 `formatDuration`（内部取整、负数钳零）。
+ */
+function statusLine(goal: Goal, messages: Messages, now: number): string {
   const budget =
     goal.tokenBudget === undefined
       ? messages["status.noBudget"]
@@ -242,7 +248,10 @@ function statusLine(goal: Goal, messages: Messages): string {
   const lastError = goal.lastError
     ? format(messages["status.lastError"], { error: goal.lastError.message || goal.lastError.type })
     : ""
-  const created = format(messages["status.created"], { time: localTime(goal.createdAt) })
+  const created = format(messages["status.created"], {
+    time: localTime(goal.createdAt),
+    elapsed: formatDuration(messages, (now - goal.createdAt) / 1000),
+  })
   return format(messages["status.line"], {
     status: statusLabel(messages, goal.status),
     tokens: goal.tokensUsed,
