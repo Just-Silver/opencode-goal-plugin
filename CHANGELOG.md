@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 注意
+
+- **命令顺序只影响服务端列表**：命令的注册顺序（0.4.1 起为 `/goal`、`/goal-status`、`/goal-rebuild`、`/goal-budget`、`/goal-pause`、`/goal-resume`、`/goal-clear`、`/goal-debug`）决定 `command.list` 的返回顺序；`/` 菜单的显示顺序由宿主 TUI 决定（空输入按字母序，输入后按模糊匹配排序），插件无法控制。
+
 ## [0.4.1] - 2026-09-26
 
 ### Changed
