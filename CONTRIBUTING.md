@@ -73,15 +73,43 @@ bun scripts/smoke-api.mjs --list                          # 场景列表
 - 依赖 bun（`bun:sqlite`）与 `opencode` CLI。退出码 0 = 全过。
 - `continuation` / `truncate` 依赖模型配合（能力强的一次做完 / 会压缩目标），失败时先看日志再判断是不是插件问题。
 
-## 给模型注入上下文（务必护住 prompt 缓存）
+## 贡献规则：向模型注入上下文必须缓存友好
 
-有一条硬规则：**system 只放「会话/目标生命周期内逐字节不变」的内容**。会随轮次变化的字段（用量、耗时、状态标签、时间戳…）若放进 system，会**每轮击穿**宿主打在「最后一个 system part」上的缓存断点，从该断点起到最新消息全部按全价重算。
+> **硬性评审项**：任何改动「注入模型提示词」的改动（prompt 文案、hook 注入、工具描述）都必须满足本节。违反的代价是**每个请求都白付一次全价 token**——很可能比功能本身还贵。
 
-- 稳定内容 → **system**（被缓存）：如目标 `objective`、固定规则文本。
-- 动态内容 → **messages**（不缓存）：工具返回；或 `hook("context")` 里往 `input.messages` 追加（内存追加零历史增长；落库追加需去重）。
-- 用户查看 → **命令回执**（`session.synthetic` + `resume:false` 的 `description`）。
+### 规则
 
-宿主缓存策略（system 首尾双断点、断点上限等）、真机实测数据与探针方法，见 **`docs/opencode/prompt-cache.md`**。
+- **system 只放「会话/目标生命周期内逐字节不变」的内容**（如目标 `objective`、固定规则文本）。
+- **会随轮次/进度变化的字段一律不进 system**：用量计数、耗时、状态标签、时间戳、剩余额度……
+- 动态信息的正当出口：
+  - **模型按需** → 工具返回（进 messages）；
+  - **用户查看** → 命令回执（`session.synthetic` + `resume:false` 的 `description`）；
+  - **每轮必须给模型** → `hook("context")` 里往 `input.messages` 追加（内存追加零历史增长；落库追加**必须去重**，否则每轮叠加）。
+
+### 为什么
+
+宿主在「**第一个** system part」和「**最后一个** system part」各打一个缓存断点（默认策略 `{tools, system, messages:{tail:1}}`）。缓存键是「请求开头 → 断点」的整段内容，**任一字节变即整段作废**。把动态内容放在 system 末尾，等于**每轮击穿尾断点**——从该断点到最新消息全部按全价重算。
+
+机制、源码与真机实测见 **`docs/opencode/prompt-cache.md`**。
+
+### 反例 / 正例
+
+```ts
+// ❌ 每轮变 → 每轮击穿尾断点
+input.system.push({ type: "text", text: `Tokens used: ${goal.tokensUsed}` })
+
+// ✅ system 只放稳定内容
+input.system.push({ type: "text", text: goalContext(goal) }) // objective + 固定规则
+// ✅ 动态信息另走：模型 goal(op="get") 按需取；用户 /goal-status 查看
+```
+
+### 提交前自检
+
+- [ ] system 注入是否**只含**生命周期内不变的内容？
+- [ ] 任何随进度变化的字段（计数、耗时、`status`、时间戳、剩余额度）是否已**排除出 system**？
+- [ ] 动态信息是否都有**非 system 出口**？
+- [ ] 有改 tools 描述/清单吗？（工具列表也会击穿 tools 断点）
+- [ ] **实测**：连续两次请求的 system 哈希是否相同？（探针方法见 `prompt-cache.md` §5）
 
 ## 发布
 
