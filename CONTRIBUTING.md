@@ -73,6 +73,16 @@ bun scripts/smoke-api.mjs --list                          # 场景列表
 - 依赖 bun（`bun:sqlite`）与 `opencode` CLI。退出码 0 = 全过。
 - `continuation` / `truncate` 依赖模型配合（能力强的一次做完 / 会压缩目标），失败时先看日志再判断是不是插件问题。
 
+## 给模型注入上下文（务必护住 prompt 缓存）
+
+有一条硬规则：**system 只放「会话/目标生命周期内逐字节不变」的内容**。会随轮次变化的字段（用量、耗时、状态标签、时间戳…）若放进 system，会**每轮击穿**宿主打在「最后一个 system part」上的缓存断点，从该断点起到最新消息全部按全价重算。
+
+- 稳定内容 → **system**（被缓存）：如目标 `objective`、固定规则文本。
+- 动态内容 → **messages**（不缓存）：工具返回；或 `hook("context")` 里往 `input.messages` 追加（内存追加零历史增长；落库追加需去重）。
+- 用户查看 → **命令回执**（`session.synthetic` + `resume:false` 的 `description`）。
+
+宿主缓存策略（system 首尾双断点、断点上限等）、真机实测数据与探针方法，见 **`docs/opencode/prompt-cache.md`**。
+
 ## 发布
 
 见 `docs/opencode/releasing.md`；发布前跑 `docs/opencode/smoke-checklist.md`。

@@ -17,6 +17,7 @@ OpenCode V2 的 goal 插件。单包、**零运行时依赖**、TS ESM，bun 直
 - **`dependencies` 必须为空**；对 `@opencode/*` / `effect` **只能用 `import type`**（值导入会让插件在宿主里加载失败）。运行时不得 `child_process` / spawn。
 - **入口有两条不同路径**：本地目录安装找 `<dir>/server.ts`（根 `server.ts` 是转发器 → `src/server.ts`；`main`/`exports` **不参与**这条）；npm/git 安装走「包名 + `exports` 子路径」。改入口时两条都要顾。
 - **`package.json.files` 决定发布内容**：`src/**/*.ts`（排除 `*.test.ts`）、`server.ts`、`CHANGELOG.md`。新增运行时文件必须落在这些路径内，否则不进 npm 包。
+- **注入 system 只放「生命周期内逐字节不变」的内容**：会随轮次变化的字段（用量、耗时、状态标签、时间戳…）一律走 messages（工具返回，或 `hook("context")` 的 `input.messages`）或命令回执——否则每轮击穿宿主打在「最后一个 system part」上的 prompt 缓存断点。详见 `docs/opencode/prompt-cache.md`。
 - tsconfig：`verbatimModuleSyntax`（类型导入必须 `import type`）、`noUncheckedIndexedAccess`（索引访问为 `T | undefined`）、`include: ["src"]`。
 
 ## 架构
@@ -50,5 +51,5 @@ OpenCode V2 的 goal 插件。单包、**零运行时依赖**、TS ESM，bun 直
 ## 文档导航
 
 - `README.md` 面向**使用者**（安装/用法/配置项）——别往里塞开发细节；开发内容放 `CONTRIBUTING.md`。
-- 设计规格/计划：`docs/superpowers/{specs,plans}/`；宿主事实与踩坑：`docs/opencode/{plugin-dev-gotchas,known-issues,config-install}.md`。
+- 设计规格/计划：`docs/superpowers/{specs,plans}/`；宿主事实与踩坑：`docs/opencode/{plugin-dev-gotchas,prompt-cache,known-issues,config-install}.md`。
 - `.superpowers/` 是本地 SDD 临时产物（已 gitignore），不要提交。
