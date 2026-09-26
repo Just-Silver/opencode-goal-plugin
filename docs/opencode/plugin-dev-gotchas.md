@@ -19,7 +19,7 @@
 | 5 | 插件目标必须是**目录** | 指向文件会被 `configured plugin path must be a directory` 丢弃 |
 | 6 | `opencode plugin list` 不能作「加载成功」判据 | 它读后台 service 缓存（2026-09-25 实测：**会**列出配置的包插件与版本），但「没列出 / 列了」都不代表本次热重载成功——看日志 entrypoint |
 | 7 | `Bun.resolveSync` 缓存负面结果 | 同进程内「先探测失败 → 再建文件」仍失败 |
-| 8 | `ctx.session.synthetic` 必须 `resume: false` | 否则确定性子命令会白唤醒一轮模型 |
+| 8 | `ctx.session.synthetic` 必须 `resume: false` | 否则确定性子命令会白唤醒一轮模型；但 `false` 只是**不唤醒**，回执**仍落一条消息进历史**（占后续 token） |
 | 9 | `.gitignore` 的 VS 模板 `**/[Pp]ackages/*` | 会静默吞掉 `docs/**/sources/packages/**` 归档 |
 | 10 | 改完插件要**确认最新代码已加载** | 用临时探针（storage key / 工具返回标记）实测，别假设热重载生效 |
 | 11 | 命令回执**人看不到** | 命令没有返回通道；给人看必须传 `synthetic` 的 **`description`**（`text` 只给模型） |
@@ -28,7 +28,7 @@
 | 14 | `session.deleted` 的 payload **只有 `sessionID`**（不带 `location`） | 归属判定必须**豁免**它：会话已删时回落查询必然失败，否则删除事件被丢弃、KV 记录永久残留 |
 | 15 | 测试里**编造**错误/事件形状 | 会遮住真 bug：我们编了 `{status: 404}`、测试助手还自动补 `location`，155 个测试全绿却漏掉两个真 bug |
 | 16 | 包安装与本地目录的**入口解析路径不同** | git/npm 安装走 `exports`（且按 `files` 过滤，运行时文件必须放进 `src/`）；本地目录走 `<dir>/server`。改入口两边都要照顾 |
-| 17 | 动态内容注入 **system** 会击穿 prompt 缓存 | system 只放生命周期内**逐字节不变**的内容；会变的走 messages / 工具返回 / 命令回执。详见 **`prompt-cache.md`** |
+| 17 | 动态内容注入 **system** 会击穿 prompt 缓存 | system 只放生命周期内**逐字节不变**的内容；会变的走 messages（工具返回 / 命令回执——**二者都进模型上下文**，只是不进 system）。详见 **`prompt-cache.md`** |
 
 ---
 
@@ -140,7 +140,8 @@ async function belongsToThisLocation(sessionID: string) {
 - 本地插件改文件会触发重载；日志里 `msg="loading plugin"` 每次重载出现 **N 条**（N = location 数）。
 - 「看到 loading 日志」**不足以**证明加载成功——loading 在**加载开始**时打印，失败发生在其后，会额外记 `WARN failed to load plugin`。
 - 插件的 `console.log` / `console.error` **不会**进 `opencode.log`；要观察内部状态就用 `/goal-debug`（或写一条全局 storage key）。
-- **命令不注入模型上下文**（源码证据：`Command.Service` 只在 `session/command.ts`（执行）、`plugin/host.ts`（插件 API）、`plugin/internal.ts`（注册）出现，`session/system-prompt.ts` 里没有任何命令清单）；**工具会注入**（name + description + input schema 都进模型上下文）。所以「给 agent 自主诊断」的入口只能是工具，「给人随手查」的入口用命令最干净。
+- **命令「定义」不注入模型上下文**（源码证据：`Command.Service` 只在 `session/command.ts`（执行）、`plugin/host.ts`（插件 API）、`plugin/internal.ts`（注册）出现，`session/system-prompt.ts` 里没有任何命令清单，命令菜单也不占工具表）；**工具定义会注入**（name + description + input schema 都进模型上下文）。所以「给 agent 自主诊断」的入口只能是工具，「给人随手查」的入口用命令最干净。
+  - ⚠️ 但**命令执行时的回执会注入**：所有命令输出都经 `synthetic` 落一条消息进历史（见 §6），下一轮以 `[Synthetic context]` 出现。所以「命令零上下文成本」是错觉——它只是**不进 system、不占工具表、不唤醒模型**，但**回执文本照样计费**，越短越好。
 - 验证多个实例：`/goal-debug env` 看本实例 location；跨实例集合可用全局 storage 临时登记（实测本机同时加载 **3 个** location 实例。具体目录属机器相关，仓库内不记录）。
 - 命令/工具的输出**必须传 `synthetic` 的 `description`** 人才看得见（只给 `text` 会变成一行空白通知），见 §6。
 
@@ -241,6 +242,7 @@ async function belongsToThisLocation(sessionID: string) {
 ## 5. 其它已验证的约束
 
 - **`ctx.session.synthetic` 必须 `resume: false`**：否则确定性命令（如 `/goal-status`）会唤醒一轮模型。出处：`packages/core/src/plugin/plan.ts` 同样用法。
+  - 注意：`resume: false` **只表示不唤醒**，消息仍会落进会话历史、下一轮被模型读到（见 §6）——它是"不额外开一轮"，不是"零 token"。
 - **续跑 agent 未知时保守跳过**，绝不回退成 `"build"`（否则会把受限 agent 放行）。
 - **`session.execution.interrupted` → `paused`**（宿主给定信号，非启发式）。
 - **`.gitignore` 别用 Visual Studio 模板**：其 NuGet 规则 `**/[Pp]ackages/*` 会静默吞掉 `docs/**/sources/packages/**` 归档（本项目曾因此漏提交 44 个文件）。TS/Bun 项目用 `Node` 模板。
@@ -272,6 +274,8 @@ await ctx.session.synthetic({ sessionID, text, description: text, resume: false 
 `InlineToolLabel` 带 `flexWrap="wrap"`（`packages/tui/src/routes/session/message-parts.tsx`），所以 notice 行会**换行**显示长文本；Markdown 表格不渲染，是等宽纯文本（调试够用）。
 
 **没有"只给人看、不进模型"的出口**：synthetic 的 `text` 会留在模型上下文里（下一轮以 `[Synthetic context]` 出现）。介意污染就改用**工具**——工具结果由 agent 转述，且只在被调用时产生。
+
+> 推论：**每条命令回执都会增加后续 token**（并让 messages 的 tail 断点移到它身上）。所以回执要短：`/goal-debug` 输出保持一行、`statusLine` 别塞无关字段。这也解释了为什么「命令零 token」的说法只在不唤醒模型的意义上成立。
 
 **怎么验证**：TUI 里敲 `/goal-debug env`，应出现 `◈` 开头、可换行的诊断文本；`bun test` 里 `server.test.ts` 断言了 `synthetic[0].description === synthetic[0].text`。
 

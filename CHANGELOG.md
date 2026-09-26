@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 文档
+
+- 澄清「命令回执」的真实成本：所有命令输出都经 `session.synthetic` 落一条消息进会话历史，下一轮仍会被模型读到并计费——`resume: false` 只是**不唤醒模型**（不额外开一轮），并非"零 token / 不注入模型上下文"。相应修正 `CONTRIBUTING.md`、`docs/opencode/prompt-cache.md`、`docs/opencode/plugin-dev-gotchas.md`、`docs/opencode/smoke-checklist.md` 与源码注释。
+
 ## [0.4.2] - 2026-09-26
 
 ### Changed

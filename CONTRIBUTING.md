@@ -45,7 +45,7 @@ bunx tsc --noEmit   # 类型检查
 
 ## 调试入口
 
-`/goal-debug env|events|sessions|state`（人看）与 `goal_debug` 工具（agent 用）：只读、确定性、零 token，**不注入模型上下文**。
+`/goal-debug env|events|sessions|state`（人看）与 `goal_debug` 工具（agent 用）：只读、确定性、不唤醒模型。注意回执仍经 `synthetic` 落一条消息进会话历史（会占后续 token，故输出保持短），并非"零成本"。
 
 | 参数 | 看什么 |
 | --- | --- |
@@ -83,7 +83,7 @@ bun scripts/smoke-api.mjs --list                          # 场景列表
 - **会随轮次/进度变化的字段一律不进 system**：用量计数、耗时、状态标签、时间戳、剩余额度……
 - 动态信息的正当出口：
   - **模型按需** → 工具返回（进 messages）；
-  - **用户查看** → 命令回执（`session.synthetic` + `resume:false` 的 `description`）；
+  - **用户查看** → 命令回执（`session.synthetic` + `resume:false` 的 `description`）。注意：`resume:false` 只是**不唤醒模型**，回执 `text` 仍会落进会话历史、下轮被模型读到（占 token），所以回执要短；
   - **每轮必须给模型** → `hook("context")` 里往 `input.messages` 追加（内存追加零历史增长；落库追加**必须去重**，否则每轮叠加）。
 
 ### 为什么

@@ -130,7 +130,7 @@ async function renderState(
 }
 
 /**
- * `/goal-debug` 的确定性入口：零 token、只读、不产生任何副作用。
+ * `/goal-debug` 的确定性入口：只读、不唤醒模型；**但仍会落一条消息进历史**（故输出必须短）。
  * 输出保持**短**且为纯文本：命令的唯一出口是往会话插一条消息，会留在历史里。
  */
 export function createDebug(deps: GoalDeps, source: DebugSource): Debug {

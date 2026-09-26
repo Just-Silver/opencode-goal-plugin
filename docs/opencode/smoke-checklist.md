@@ -112,7 +112,7 @@
 > 插件临时以**本地目录**安装（`plugins: [{ "package": "<repo>" }]`，加载分支 `feat/v2-continuation-count-and-budget` 的**未发布**代码），验收后已**复原为 npm 包**。
 > 探针脚本 `.superpowers/budget-count-smoke.mjs`（一次性、已 gitignore）。
 
-- **确定性分支（零 token）**：`/goal-status` 无目标 → 「本会话未设置目标。」；`/goal-budget` 空参 → 用法；`/goal-budget abc` → 「无效的预算「abc」…」；`/goal-budget 9007199254740993`（超 safe integer）→ 非法；`/goal-budget 500` 无目标 → 未设置目标。**5/5** ✓
+- **确定性分支（不唤醒模型；回执仍入历史）**：`/goal-status` 无目标 → 「本会话未设置目标。」；`/goal-budget` 空参 → 用法；`/goal-budget abc` → 「无效的预算「abc」…」；`/goal-budget 9007199254740993`（超 safe integer）→ 非法；`/goal-budget 500` 无目标 → 未设置目标。**5/5** ✓
 - **预算护栏 + 计数展示**：模型建 `token_budget=1` 目标 → 状态行 `目标（预算用尽）— tokens 22631 / 预算 1（cacheRead 10368 · 新增 12263）；4s；自动续跑 0 次。目标：…` ✓
 - **改大自动恢复**：`/goal-budget 500000` → 回执「预算已设为 500000；目标当前为「进行中」。」；状态确为 `进行中` + `预算 500000` ✓
 - **清空预算**：`/goal-budget none` → 「已取消预算（不限）；目标当前为「进行中」。」；状态显示 `无预算` ✓

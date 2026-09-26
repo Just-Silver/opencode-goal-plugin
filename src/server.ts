@@ -65,7 +65,7 @@ export default {
     const debug = createDebug(deps, { pluginId: PLUGIN_ID, snapshot: () => router.diagnostics() })
 
     // 命令：`/goal <目标>` 转发给模型；状态控制是**独立命令**（宿主没有子命令概念，
-    // 后台拦截保留名会让用户打错一个字就变成目标文字）。全部零 token、不走模型。
+    // 后台拦截保留名会让用户打错一个字就变成目标文字）。状态控制命令不唤醒模型；但回执仍经 synthetic 落一条消息进历史。
     ctx.command.transform((editor) => {
       const handlers = createCommandHandlers(deps, { deliver, notify })
       const name = options.commandName

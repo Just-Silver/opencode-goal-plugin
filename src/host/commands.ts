@@ -48,7 +48,7 @@ export function parseBudgetArg(text: string): BudgetArg {
 export interface CommandPort {
   /** 触发一次模型轮（转发目标文本）。走 synthetic，TUI 只显示 `description` 一行。 */
   readonly deliver: (input: { sessionID: string; text: string; description: string }) => Promise<void>
-  /** 不经模型地把消息显示给用户（status/pause/resume/clear 的回执）。 */
+  /** 不唤醒模型地显示给用户（status/pause/resume/clear 的回执）；仍落一条 synthetic 消息进历史，下轮模型可见、占 token。 */
   readonly notify: (sessionID: string, text: string) => Promise<void>
 }
 
@@ -60,18 +60,19 @@ export interface CommandInput {
 export interface GoalCommandHandlers {
   /** `/goal <目标>`：空参报告状态，其余转发给模型。 */
   readonly goal: (input: CommandInput) => Promise<void>
-  /** `<name>-status`：服务端确定性报告（零 token）。 */
+  /** `<name>-status`：服务端确定性报告（不唤醒模型；回执仍入历史）。 */
   readonly status: (sessionID: string) => Promise<void>
   readonly pause: (sessionID: string) => Promise<void>
   readonly resume: (sessionID: string) => Promise<void>
   readonly clear: (sessionID: string) => Promise<void>
-  /** `${name}-budget`：零 token 地改/清空当前目标的预算。 */
+  /** `${name}-budget`：不唤醒模型地改/清空当前目标的预算（回执仍入历史）。 */
   readonly budget: (sessionID: string, text: string) => Promise<void>
-  /** `${name}-rebuild`：零 token 地替换当前目标的正文（状态、预算与全部记账原样保留）。 */
+  /** `${name}-rebuild`：不唤醒模型地替换当前目标的正文（状态、预算与全部记账原样保留；回执仍入历史）。 */
   readonly rebuild: (sessionID: string, text: string) => Promise<void>
 }
 
-/** 命令面的确定性入口：全部零 token、零歧义；只有 `/goal <目标>` 会转发给模型。 */
+/** 命令面的确定性入口：全部不唤醒模型、零歧义；只有 `/goal <目标>` 会转发给模型。
+ * 注意「不唤醒」≠「零成本」：回执经 synthetic 落一条消息进会话历史，后续轮次会带上它（占 token）。 */
 export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCommandHandlers {
   const status = async (sessionID: string): Promise<void> => {
     const existing = await deps.repo.load(sessionID)

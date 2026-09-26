@@ -225,7 +225,7 @@ const RE_STATUS_LINE = /^(Goal \(|目标（)/
 
 // ---------- 场景 ----------
 const SCENARIOS = {
-  // 零 token：命令面
+  // 不唤醒模型：命令面（回执仍会经 synthetic 落进历史）
   commands: {
     title: "命令面：无目标时 status / pause / resume / clear",
     run: async (ctx) => {
