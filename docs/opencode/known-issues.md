@@ -143,7 +143,7 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 
 **待办**：每次升级 opencode 前复核 `PluginContext` 是否仍有 `event`；若被移除，迁移到 namespaced hook API 或等价的事件订阅入口。
 
-**验证**：升级后跑 `bun scripts/smoke-api.mjs --session <sid>`，全量应 9/9；若事件订阅 API 变更，续跑/记账会直接失效。
+**验证**：升级后跑 `bun scripts/smoke-api.mjs --session <sid>`（全量场景，当前 15 个）应全绿；若事件订阅 API 变更，续跑/记账会直接失效。
 
 ---
 
@@ -161,9 +161,9 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 
 ### [ ] 插件缺少「只发给用户看、不进模型上下文」的输出通道
 
-**状态**：已定位，待本插件 TUI 改造全部完成后，向 opencode 提 feature request。
+**状态**：已定位。**本插件已绕过**（0.5.0：命令回执改走 RPC 事件 → TUI 插件的 `ui.toast.show`，0 token）——但那是"自己搭通道"，上游仍缺原生出口；issue 仍值得提。
 
-**现象**：服务端插件要让**用户**看到一行反馈（命令回执、状态展示），唯一出口是 `ctx.session.synthetic(...)`。但这条消息的 `text` **必然进入模型上下文**（下一轮以 `[Synthetic context]` 出现），即使 `resume: false` 也一样。`description` 虽然只用于 TUI 显示，却**无法单独发送**——即"给用户看"与"喂给模型"被绑在同一条消息上。
+**现象**：服务端插件要让**用户**看到一行反馈（命令回执、状态展示），唯一出口是 `ctx.session.synthetic(...)`。但这条消息的 `text` **必然进入模型上下文**（下一轮以 `[Synthetic context]` 出现），即使 `resume: false` 也一样。`description` 虽然只用于 TUI 显示，却**无法单独发送**——即"给用户看"与"喂给模型"被绑在同一条消息上。（0.5.0 起本插件用 `ctx.rpc.register` → TUI 的 `ui.toast.show` 绕过，但那是插件自己搭通道，上游仍缺原生出口。）
 
 **证据（本机 `@opencode/plugin` 2.0.16 / `@opencode/schema` / `@opencode/client` 类型）**：
 
@@ -173,6 +173,8 @@ cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: r4-coder/dee
 - 服务端命令 `CommandDefinition.execute` 返回 `Promise<void>`（**无返回值通道**）；服务端 `Context` **没有** `ui.*`（`ui.toast` / `ui.dialog` 属 TUI 插件）。
 
 **影响**：任何"确定性命令 / 纯 UI 回执"都被迫写入模型上下文——用户为**纯界面信息**付 token，并**污染模型上下文与思维链**。本插件因此被迫把全部命令回执改为 TUI 界面通道（见规格 `docs/superpowers/specs/2026-09-26-opencode-goal-v2-tui-zero-token-display-design.md`）。
+
+**本插件的现状（0.5.0）**：命令回执 → RPC 事件 → TUI toast（0 token、不写会话消息）；**必须留痕**的提示（停摆回执）仍走 `synthetic` + `resume: true`（`text` 给模型、`description` 给人看，代价是醒来一轮）。详见 `plugin-dev-gotchas.md` §6 / §11。
 
 **请求（issue 正文要点）**：提供一种「只面向用户、不进模型上下文」的输出通道。候选方案：
 

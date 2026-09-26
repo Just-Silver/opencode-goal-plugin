@@ -44,7 +44,9 @@
 
 ## 5. 自动化场景一览（`scripts/smoke-api.mjs`）
 
-`commands` / `basic` / `block` / `budget` / `interrupt` / `continuation` / `background` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty` / `compaction`。
+`commands` / `basic` / `budget-stop-resume` / `block` / `budget` / `interrupt` / `continuation` / `background` / `background-subagent` / `conflict` / `truncate` / `kv-cleanup` / `reconcile` / `empty` / `compaction`（共 15 个）。
+
+跑法：`bun scripts/smoke-api.mjs --session ses_xxxx [--scenario a,b] [--list]`——**传会话 ID 即可**，鉴权自动读 `~/.local/state/opencode/service.json`（`opencode pair` 已不再打印口令）；断言同时看 SSE 事件流与会话转录。
 
 ## 6. 验收结果（2026-09-25，V1 收尾）
 
@@ -122,4 +124,19 @@
 - **清理**：`/goal-clear` → 「目标已清除。」 ✓
 - **回归**：`smoke-api.mjs --session <sid> --scenario budget` **PASS**（9.3s）✓
 - **汇总：探针 18/18 PASS。**
-- **顺带修掉的语言依赖（非本次功能回归）**：`smoke-api.mjs` 原用**英文正则**匹配回执（`/No goal/i`、`/^Goal \(/`、`/Goal auto-continue/i`），i18n 交付后在 `zh-CN` 机器上必然误报；已改为脚本顶部的双语常量 `RE_NO_GOAL` / `RE_STATUS_LINE` / `RE_AUTO_CONTINUE`（约定见 `CONTRIBUTING.md`）。修复后复跑 `commands,basic,continuation` **3/3 PASS**（其中 `continuation` 实测 `auto-continue 回执=2`，修前为 0 → 旧脚本会把正常行为判为 FAIL）。
+- **顺带修掉的语言依赖（非本次功能回归）**：`smoke-api.mjs` 原用**英文正则**匹配回执（`/No goal/i`、`/^Goal \(/`、`/Goal auto-continue/i`），i18n 交付后在 `zh-CN` 机器上必然误报；已改为脚本顶部的双语常量（`RE_AUTO_CONTINUE` 等，约定见 `CONTRIBUTING.md`）。修复后复跑 `commands,basic,continuation` **3/3 PASS**。
+  - **0.5.0 更新**：命令回执改走 RPC → TUI toast 后，事件流里**不再有命令回执**，所以 `RE_NO_GOAL` / `RE_STATUS_LINE` 已删除，`commands` 场景改为断言「回执不新增会话消息」。见下方 §11。
+
+## 11. 停摆回执 / 恢复激活真机验收（2026-09-26，0.5.0）
+
+> 会话 `ses_f22796397ffeWSAVE2Og5yyzYO`（location `D:\Code\Projects\Agents\opencode-goal-plugin`，模型 `xiaomi/mimo-v2.6-flash`）与 `ses_f22727408ffexz5VFvWPF6Jkp9`（location `C:\Users\13178`）。
+> 代码先以**本地目录**安装验收，验收后切回 **npm 包**：`/api/plugin` 显示 `source:{type:"package",target:"@justsilver/opencode-goal-plugin",version:"0.5.0"}`、`features:{server,tui,rpc}`、`status:"active"`。
+
+- **停摆回执（命令路径）**：`/goal-budget 1`（设到已用量之下）→ 状态 `budget-limited`；转录出现 `synthetic` 行 `目标已标记为预算用尽。可用 /goal-budget 提高预算后继续。`，其 `text` 为收尾指令（`The active goal has stopped because it reached its token budget…`）✓
+- **停摆回执（自然路径＝原始故障场景）**：预算 `644930`，目标自然续跑至 `tokensUsed=657938` 越界 → `budget-limited`，同样出现该回执 ✓
+- **只多一轮收尾**：停摆后**恰好一轮** assistant 收尾（模型回「已完成 1–36 / 剩余 37–100 / 下一步 提高预算」），之后**再无** `目标自动续跑` 行 ✓
+- **`/goal-resume` 预算不足 → 拒绝**：`budget=1`、`used=1018681` 时执行 → 状态仍 `budget-limited`、`continuations` 不变（**未唤醒**）✓
+- **`/goal-resume` 预算够 → 激活**：`paused` + 预算充足 → `active` 且 `continuations` 7 → 14 ✓
+- **`/goal-budget` 改大 → 回 active 并激活**：`budget-limited` 时 `budget 484990`（> 已用）→ `active` 且 `continuations` 17 → 24 ✓
+- **冒烟脚本（鉴权/传参修复后）**：`bun scripts/smoke-api.mjs --session ses_f22727408ffe… --scenario commands,budget-stop-resume` → **2/2 PASS（35s）** ✓
+- **测试**：`bun test` = **304 pass / 0 fail**；`bunx tsc --noEmit` = 0 错。

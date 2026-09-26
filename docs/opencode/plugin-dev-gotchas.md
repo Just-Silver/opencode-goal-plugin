@@ -58,10 +58,10 @@ session.execution.interrupted → paused
 
 **怎么验证**（真实事件流，不猜）：
 ```powershell
-# 后台 service 的地址/口令
-opencode pair
-# 订阅真实事件流（Windows 上用 curl.exe，-N 禁用缓冲，Basic auth = opencode:<Password>）
-curl.exe -N -s -u "opencode:<Password>" "http://127.0.0.1:<port>/api/event" > $env:TEMP\oc-events.log
+# 后台 service 的地址/口令（`opencode pair` 现在只给一次性连接链接，**不再打印口令**）
+$svc = Get-Content "$env:USERPROFILE\.local\state\opencode\service.json" -Raw | ConvertFrom-Json
+# 订阅真实事件流（Windows 上用 curl.exe，-N 禁用缓冲，Basic auth = opencode:<password>）
+curl.exe -N -s -u "opencode:$($svc.password)" "$($svc.url)/api/event" > $env:TEMP\oc-events.log
 ```
 实测该流里 `session.execution.started/succeeded` 各出现（每轮一对），**`session.status` 出现 0 次**。
 
@@ -232,7 +232,7 @@ async function belongsToThisLocation(sessionID: string) {
 
 ### 4.3 抓真实事件流的可靠姿势
 
-- 用 `curl.exe -N -s -u "opencode:<Password>" http://127.0.0.1:<port>/api/event`（`--max-time` 限时）。
+- 用 `curl.exe -N -s -u "opencode:$($svc.password)" "$($svc.url)/api/event"`（口令/地址取自 `~/.local/state/opencode/service.json`；`--max-time` 限时）。
 - 用 `Start-Job` 包 `opencode api GET /api/event` 重定向到文件**可能拿不到内容**（缓冲），优先 `curl.exe` 直连。
 - 事件是 SSE：`data: {...}` 每行一条；解析 `type` / `data` / `location` 即可。
 
@@ -244,8 +244,11 @@ async function belongsToThisLocation(sessionID: string) {
 
 ## 5. 其它已验证的约束
 
-- **`ctx.session.synthetic` 必须 `resume: false`**：否则确定性命令（如 `/goal-status`）会唤醒一轮模型。出处：`packages/core/src/plugin/plan.ts` 同样用法。
-  - 注意：`resume: false` **既不唤醒、也永不送达**——合成消息的转录行与模型输入都发生在**投递**时，而没人唤醒就没有投递（见 §11）。需要送达就用 `resume: true`（代价一轮）。
+- **`ctx.session.synthetic` 的 `resume` 同时决定「要不要唤醒」和「会不会送达」**（见 §11）：
+  - `resume: false` = 只入队、不唤醒。而合成消息的转录行与模型输入都发生在**投递**时 → 没人唤醒就没有投递 → **终态下永不送达**（人和模型都收不到）。
+  - `resume: true` = 入队后立刻 `execution.wake` → 投递（落转录 + 进模型），代价是**一轮模型调用**。
+  - 结论：**需要人/模型看到的**（停摆回执）用 `resume: true`；**命令回执不要走 synthetic**，走 RPC → TUI toast（0 token）。
+  - 出处参考：宿主自己也在用同样语义（`packages/core/src/plugin/plan.ts` 的 `resume: false` 是"只留痕、不唤醒"）。
 - **续跑 agent 未知时保守跳过**，绝不回退成 `"build"`（否则会把受限 agent 放行）。
 - **`session.execution.interrupted` → `paused`**（宿主给定信号，非启发式）。
 - **`.gitignore` 别用 Visual Studio 模板**：其 NuGet 规则 `**/[Pp]ackages/*` 会静默吞掉 `docs/**/sources/packages/**` 归档（本项目曾因此漏提交 44 个文件）。TS/Bun 项目用 `Node` 模板。
@@ -262,25 +265,32 @@ async function belongsToThisLocation(sessionID: string) {
 
 **根因（出处）**：
 - `CommandDefinition.execute` 返回 `Promise<void>`（`packages/plugin/src/promise/command.ts`；宿主侧 `packages/core/src/command.ts` 的 `Definition.execute` 返回 `Effect.Effect<void, unknown>`）——**命令没有"返回值"通道**，不能像 CLI 那样 `return "文本"` 让前端打印。
-- 服务端插件**没有 toast / 通知 API**：`ctx.event` 只有 `subscribe`（`packages/plugin/src/promise/event.ts`），没有 publish；`ctx.ui.toast` 只属于 **TUI 插件**（`packages/plugin/src/tui/context.ts`），服务端插件拿不到。
-- 唯一出口是 `ctx.session.synthetic(...)`，而 **TUI 只渲染 synthetic 的 `description`**。`packages/tui/src/routes/session/index.tsx` 的 `SessionNoticeMessageV2`：
+- 服务端插件**没有直接渲染 API**：`ctx.event` 只有 `subscribe`（`packages/plugin/src/promise/event.ts`），没有 publish；`ctx.ui.toast` 只属于 **TUI 插件**（`packages/plugin/src/tui/context.ts`），服务端插件拿不到。
+  - **但可以绕一层**：服务端 `ctx.rpc.register(def)` 发事件 → **TUI 入口**（`exports["./tui"]`，配置安装的包会**自动加载**）用 `context.client.rpc(def).events.on(name, cb)` 接住 → `ui.toast.show(...)` 渲染。这是**唯一**能做到「0 token、不写会话消息」的回执通道（见速查表 18/19/20）。
+- 需要**留痕**（人回来还能看到、模型也知情）时仍走 `ctx.session.synthetic(...)`，而 **TUI 只渲染 synthetic 的 `description`**。`packages/tui/src/routes/session/index.tsx` 的 `SessionNoticeMessageV2`：
   ```ts
   if (props.message.type === "synthetic") return props.message.description ?? ""
   ```
   schema 注释也写着 `description` 是 "A short human-readable summary for transcript display"（`packages/schema/src/session-message.ts`）。
 - 即：**`text` 是给模型的**（会以 `[Synthetic context]` 进上下文），**`description` 才是给人看的**。
 
-**正确做法**：给人看的回执**两个都传**：
+**正确做法（两条通道，按用途选）**：
 ```ts
-await ctx.session.synthetic({ sessionID, text, description: text, resume: false })
+// ① 命令回执：RPC 事件 → TUI toast（0 token、不写会话消息、不进模型上下文）
+const reg = await ctx.rpc.register(GoalRpc, {})
+await reg.events.emit("notice", { sessionID, title, message })
+
+// ② 需要留痕（人回来还看得到）/ 需要模型知情：synthetic，且**必须 resume: true**
+//    否则只是躺在收件箱里——转录不建行、模型读不到（见 §11）
+await ctx.session.synthetic({ sessionID, text: <给模型>, description: <给人看>, resume: true })
 ```
-`InlineToolLabel` 带 `flexWrap="wrap"`（`packages/tui/src/routes/session/message-parts.tsx`），所以 notice 行会**换行**显示长文本；Markdown 表格不渲染，是等宽纯文本（调试够用）。
+注意 `text` 与 `description` **分工不同**：`description` 是给人看的一行（`InlineToolLabel` 带 `flexWrap="wrap"`，`packages/tui/src/routes/session/message-parts.tsx`，所以会换行显示；Markdown 表格不渲染，是等宽纯文本），`text` 是给模型的内容。
 
 **`synthetic` 没有"只给人看、不进模型"的出口**：投递后 `text` 会留在模型上下文里（下一轮以 `[Synthetic context]` 出现）。介意污染就改用**工具**（结果由 agent 转述）或**命令面 toast**（0 token、不进模型）。
 
 > 推论：**合成消息（续跑触发 / 停摆回执）会增加后续 token**，并让 messages 的 tail 断点移到它身上，所以要短。命令回执走 toast，不在此列（真正的 0 token）。
 
-**怎么验证**：TUI 里敲 `/goal-debug env`，应出现 `◈` 开头、可换行的诊断文本；`bun test` 里 `server.test.ts` 断言了 `synthetic[0].description === synthetic[0].text`。
+**怎么验证**：TUI 里敲 `/goal-debug env`，应弹出 toast（`◈`/条目化的诊断文本）；`bun test` 里 `server.test.ts` 断言了 `/goal-debug` 只走 `notices`（RPC）而 `synthetic` 为 0。
 
 ---
 
@@ -358,8 +368,9 @@ opencode api GET /api/plugin
 opencode api session.message.list --param sessionID=ses_xxx
 opencode api session.command --param sessionID=ses_xxx -d '{"name":"goal-budget","text":"10"}'
 
-# 抓真实事件流（SSE，需要 Basic 口令 —— 而 pair 已不再给口令，见下方「待办」）
-curl.exe -N -s -u "opencode:<Password>" "http://127.0.0.1:<port>/api/event" --max-time 60 > $env:TEMP\oc-events.log
+# 抓真实事件流（SSE，需要 Basic 口令；口令在 service.json 里，`opencode pair` 已不再打印）
+$svc = Get-Content "$env:USERPROFILE\.local\state\opencode\service.json" -Raw | ConvertFrom-Json
+curl.exe -N -s -u "opencode:$($svc.password)" "$($svc.url)/api/event" --max-time 60 > $env:TEMP\oc-events.log
 
 # 事件类型统计
 Get-Content $env:TEMP\oc-events.log | ForEach-Object {
@@ -371,7 +382,7 @@ Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -P
   ForEach-Object { ($_.Line -split '\s+')[0] } | Select-Object -Last 15
 ```
 
-> **待办（2026-09-26 发现）**：`opencode pair` 的输出已改为「一次性连接链接」，**不再打印 `Password`**，因此 `scripts/smoke-api.mjs` 的 `resolveServer()` 解析失效（冒烟脚本当前跑不起来）。`opencode api` 不受影响（自带鉴权）。修法二选一：让冒烟脚本改用 `opencode api` 发请求，或找到 SSE 所需的 Basic 口令来源。
+> **已修（2026-09-26）**：`opencode pair` 改为只给「一次性连接链接」、不再打印口令后，`scripts/smoke-api.mjs` 的 `resolveServer()` 曾直接跑不起来。现已改为**优先读 `~/.local/state/opencode/service.json` 的 `url`/`password`**（其次 `opencode pair`，最后 `--server/--password`），传会话 ID 即可复用——不要再写临时脚本。
 
 ---
 

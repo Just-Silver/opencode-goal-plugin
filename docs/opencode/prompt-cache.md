@@ -126,6 +126,7 @@ Budget:
 
 - **内存追加**：只改当次请求的 `input.messages`，不落库 → 零历史增长，最干净。
 - **落库追加**：`session.synthetic({..., resume:false})` + **去重**（下轮从存储加载时已在里面就跳过），否则每轮叠加。
+  - ⚠️ `resume: false` **不唤醒、也不会自己送达**（见 `plugin-dev-gotchas.md` §11）——它只是"留痕"。真正让模型每轮看到的是上面那条 `context` 钩子；若你指望合成消息本身让模型知情，必须 `resume: true`（代价一轮）。
 - 参考宿主内置 Plan 模式（`opencode.plan`）：它就是这样做的——
   `s.messages.splice(end, 0, UserMessage)` + `session.synthetic(..., resume:false)` + `iR(s.messages, ...)` 去重。
 

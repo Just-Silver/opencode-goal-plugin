@@ -66,10 +66,11 @@ bun scripts/smoke-api.mjs --session ses_xxxx --scenario basic,block
 bun scripts/smoke-api.mjs --list                          # 场景列表
 ```
 
-- 命令/中断/建删会话走 HTTP API（口令取自 `opencode pair`，路由从 `GET /openapi.json` 动态解析）；目标状态**只读**读 `opencode.db` 的 KV（复制 db + `-wal`/`-shm` 再读，不碰原库）；回执与事件断言抓 `GET /api/event`。
-- **回执断言必须中英双语**：回执是面向用户文案，随 `language` 配置 / 系统 locale 变化。统一用脚本顶部的双语常量（`RE_NO_GOAL` / `RE_STATUS_LINE` / `RE_AUTO_CONTINUE`）匹配，别写死英文——否则中文机器上必然误报。与之相对，`goal-debug events` 的判定列（`allow` 等）、状态枚举（`active` 等）与工具错误信息**不本地化**，可直接匹配。
+- 命令/中断/建删会话走 HTTP API（**鉴权自动读 `~/.local/state/opencode/service.json` 的 `url`/`password`**——`opencode pair` 现在只给一次性连接链接、不再打印口令；也可 `--server/--password` 显式指定。路由从 `GET /openapi.json` 动态解析）；目标状态**只读**读 `opencode.db` 的 KV（复制 db + `-wal`/`-shm` 再读，不碰原库）；事件断言抓 `GET /api/event`，**转录断言**走 `session.message.list`（停摆回执/命令回执的区别就靠它）。
+- **回执断言必须中英双语**：回执是面向用户文案，随 `language` 配置 / 系统 locale 变化。统一用脚本顶部的双语常量（`RE_AUTO_CONTINUE` / `RE_BUDGET_STOP`）匹配，别写死英文——否则中文机器上必然误报。与之相对，`goal-debug events` 的判定列（`allow` 等）、状态枚举（`active` 等）与工具错误信息**不本地化**，可直接匹配。
+  - ⚠️ 0.5.0 起**命令回执走 RPC → TUI toast**，不再出现在事件流里；断言它要看「有没有新增会话消息 / 有没有入队」，别再去匹配回执文本。
 - **会真的动**：往目标会话发 `/goal`、建/删临时会话、`opencode reload`、消耗模型额度 → 用专门的冒烟会话，别拿正在干活的会话。
-- 场景：`commands`（命令面）、`basic`（create→complete→clear）、`block`（报 blocker ×3 → blocked → resume）、`budget`（`token_budget=1` → budget-limited）、`interrupt`（中断 → paused）、`continuation`（跨轮续跑）、`conflict`（已有目标时拒 create）、`truncate`（>4000 字目标进 KV）、`kv-cleanup`（reload 后删会话 → 记录消失 + 判定 allow）、`reconcile`（写孤儿 KV → reload → 被清且活记录保留）、`empty`（连续空转 → blocked，**依赖能返回空输出的模型，推理模型必 FAIL**）、`compaction`（active 目标下 `session.compact` 完成、compaction 钩子不炸、目标存活）。
+- 场景：`commands`（命令面：无目标时 4 条命令**不写会话消息**）、`basic`（create→complete→clear）、`budget-stop-resume`（**停摆回执落转录 → `/goal-resume` 预算不足被拒 → 改大预算回 active 并激活**）、`block`（报 blocker ×3 → blocked → resume）、`budget`（`token_budget=1` → budget-limited）、`interrupt`（中断 → paused）、`continuation`（跨轮续跑）、`background` / `background-subagent`（后台任务期间不续跑、完成通知唤醒）、`conflict`（已有目标时拒 create）、`truncate`（>4000 字目标进 KV）、`kv-cleanup`（reload 后删会话 → 记录消失 + 判定 allow）、`reconcile`（写孤儿 KV → reload → 被清且活记录保留）、`empty`（连续空转 → blocked，**依赖能返回空输出的模型，推理模型必 FAIL**）、`compaction`（active 目标下 `session.compact` 完成、compaction 钩子不炸、目标存活）。
 - 依赖 bun（`bun:sqlite`）与 `opencode` CLI。退出码 0 = 全过。
 - `continuation` / `truncate` 依赖模型配合（能力强的一次做完 / 会压缩目标），失败时先看日志再判断是不是插件问题。
 
