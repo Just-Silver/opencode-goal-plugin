@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 工具
+
+- **冒烟脚本修好并可复用（`scripts/smoke-api.mjs`）**：凭据改为优先读后台 service 写的 `~/.local/state/opencode/service.json`——`opencode pair` 现在只给一次性连接链接、**不再打印 Password**，脚本此前直接跑不起来（只能每次现写临时脚本）。顺带修 `control()` 丢掉第三个参数的问题（`control(sid, "budget", "1")` 会被静默当成空参，预算根本没设上），并给新场景加了「预算没写进记录就立刻失败」的护栏。命令面场景改为断言新契约（**回执不写会话消息**），新增 `budget-stop-resume` 场景覆盖「停摆回执落转录 → `/goal-resume` 预算不足被拒 → 改大预算回 active 并激活」。
+
 ## [0.5.0] - 2026-09-26
 
 ### Added

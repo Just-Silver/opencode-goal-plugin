@@ -11,7 +11,8 @@
  * 说明：
  *   - **会真的操作**：往目标会话发 /goal 命令、建/删临时会话、reload 插件、消耗模型额度。
  *     请用专门的冒烟会话（`D:\下载\Goal冒烟` 那种），别拿正在干活的会话。
- *   - 命令/中断/删会话走 HTTP API（Basic auth，口令来自 `opencode pair`）；
+ *   - 命令/中断/删会话走 HTTP API（Basic auth；口令优先读后台 service 的
+ *     `~/.local/state/opencode/service.json`，`opencode pair` 现在只给一次性连接链接）；
  *     OpenAPI 从 `GET /openapi.json` 动态解析 operationId → 路径，不写死路由。
  *   - 目标状态只读读 `opencode.db` 的 kv 表：把 db + `-wal` + `-shm` **复制**到临时目录再读，不碰原库。
  *   - 观察回执/事件走 SSE `GET /api/event`（跨 location 的全局流）。
@@ -20,7 +21,7 @@
  * 退出码：0 全过；1 有失败。
  */
 import { execSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs"
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
@@ -38,15 +39,27 @@ const opt = (name, fallback) => {
 }
 const has = (name) => argv.includes(`--${name}`)
 
-// ---------- 服务器（pair / 显式） ----------
+// ---------- 服务器（service.json / pair / 显式） ----------
+/**
+ * 凭据来源优先级：`--server/--password`（或 `OPENCODE_PASSWORD`）→ 后台 service 自己写的
+ * `~/.local/state/opencode/service.json`（含 `url` + `password`）→ 旧的 `opencode pair` 输出。
+ *
+ * 2026-09-26 起 `opencode pair` **只给一次性连接链接、不再打印 Password**，所以必须优先读
+ * `service.json`（否则每次冒烟都要现写临时脚本，正是我们要避免的）。
+ */
 function resolveServer() {
   const server = opt("server")
   const password = opt("password") ?? process.env.OPENCODE_PASSWORD
   if (server && password) return { base: server.replace(/\/$/, ""), password }
+  try {
+    const svc = JSON.parse(readFileSync(join(homedir(), ".local", "state", "opencode", "service.json"), "utf8"))
+    if (svc?.url && svc?.password) return { base: String(svc.url).replace(/\/$/, ""), password: String(svc.password) }
+  } catch {}
   const out = execSync("opencode pair", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
   const port = /127\.0\.0\.1:(\d+)/.exec(out)?.[1]
   const pass = /Password\s+(\S+)/.exec(out)?.[1]
-  if (!port || !pass) throw new Error("无法从 `opencode pair` 解析出地址/口令；用 --server/--password 显式指定")
+  if (!port || !pass)
+    throw new Error("无法解析服务地址/口令（service.json 与 `opencode pair` 都没给出）；用 --server/--password 显式指定")
   return { base: `http://127.0.0.1:${port}`, password: pass }
 }
 const { base, password } = resolveServer()
@@ -180,7 +193,10 @@ class Events {
   count(type, from = 0, sid) {
     return this.list.slice(from).filter((e) => e.type === type && (!sid || e.data?.sessionID === sid)).length
   }
-  /** 命令/续跑的 TUI 回执（synthetic item 的 description；事件流是全局的，按会话过滤） */
+  /**
+   * 经 inbox 入队的 synthetic 项（续跑触发、停摆回执）的 `description`；事件流全局，按会话过滤。
+   * 注意：**命令回执自 0.5.0 起改为 RPC → TUI toast**，不再入队、也不进会话历史（所以不在这里）。
+   */
   descriptions(from = 0, sid) {
     return this.list
       .slice(from)
@@ -196,7 +212,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const COMMAND_NAME = "goal"
 const sendCommand = (sid, name, text = "") => api("session.command", { params: { sessionID: sid }, body: { name, text } })
 const sendGoal = (sid, text) => sendCommand(sid, COMMAND_NAME, text)
-const control = (sid, action) => sendCommand(sid, `${COMMAND_NAME}-${action}`)
+/** `control(sid, "budget", "1")` —— **必须带第三个参数**，否则发出去的是空参（会得到用法提示，而不是设上预算）。 */
+const control = (sid, action, text = "") => sendCommand(sid, `${COMMAND_NAME}-${action}`, text)
 const sendPrompt = (sid, text) => api("session.prompt", { params: { sessionID: sid }, body: { text, resume: true } })
 const sessionInfo = async (sid) => {
   const r = await api("session.get", { params: { sessionID: sid } })
@@ -219,24 +236,26 @@ const check = (cond, msg) => { if (!cond) throw new Fail(msg) }
 
 // 回执是面向用户文案，随 `language` 配置 / 系统 locale 变化（en / zh-CN）。
 // 断言一律用**中英双语**匹配，脚本才能在任意语言下通过（否则中文机器上必然误报）。
-const RE_NO_GOAL = /(No goal|未设置目标)/i
+// 命令回执自 0.5.0 起走 RPC → TUI toast（事件流里看不到），所以不再有「No goal / 状态行」的正则。
 const RE_AUTO_CONTINUE = /(Goal auto-continue|目标自动续跑)/i
-const RE_STATUS_LINE = /^(Goal \(|目标（)/
+/** 预算停摆回执（`synthetic` 的 `description`，会落在会话转录里）。 */
+const RE_BUDGET_STOP = /(预算用尽|budget-limited)/i
 
 // ---------- 场景 ----------
 const SCENARIOS = {
-  // 不唤醒模型：命令面（回执仍会经 synthetic 落进历史）
+  // 不唤醒模型：命令面（0.5.0 起回执走 RPC → TUI toast，**不写会话消息、不进模型上下文**）
   commands: {
-    title: "命令面：无目标时 status / pause / resume / clear",
+    title: "命令面：无目标时 status / pause / resume / clear（回执不写会话消息）",
     run: async (ctx) => {
-      await control(ctx.sid, "clear")
+      await ctx.clearGoal()
       await sleep(1000)
+      const before = await ctx.messages()
       const m = ctx.events.mark()
       for (const action of ["status", "pause", "resume", "clear"]) { await control(ctx.sid, action); await sleep(1200) }
       await sleep(2500)
-      const receipts = ctx.receipts(m)
-      check(receipts.length >= 4, `应有 4 条回执，实际 ${receipts.length}`)
-      check(receipts.every((d) => RE_NO_GOAL.test(d)), `回执应都是 No goal：${JSON.stringify(receipts)}`)
+      const after = await ctx.messages()
+      check(after.length === before.length, `命令回执不应新增会话消息：${before.length} → ${after.length}`)
+      check(ctx.receipts(m).length === 0, `命令回执不应再经 inbox 入队：${JSON.stringify(ctx.receipts(m))}`)
       check(!(await ctx.goal()), "不应留下 KV 记录")
     },
   },
@@ -253,13 +272,84 @@ const SCENARIOS = {
       const done = await ctx.waitStatus(["complete", "blocked", "budget-limited"], 180000)
       check(done?.status === "complete", `应 complete，实际 ${done?.status}`)
       const m2 = ctx.events.mark()
+      const msgBefore = (await ctx.messages()).length
       await control(ctx.sid, "status")
       await sleep(1500)
-      check(ctx.receipts(m2).some((d) => RE_STATUS_LINE.test(d)), "status 回执应报告目标状态")
+      // status 回执走 toast（不可从事件流观察），但**必须不写会话消息**。
+      check((await ctx.messages()).length === msgBefore, "status 回执不应新增会话消息")
+      check(ctx.receipts(m2).length === 0, "status 回执不应再经 inbox 入队")
+      check((await ctx.goal())?.status === "complete", "status 不应改动目标状态")
       await control(ctx.sid, "clear")
       await sleep(2000)
       check(!(await ctx.goal()), "clear 后 KV 记录应消失")
-      ctx.log(`回执：${ctx.receipts(m).slice(0, 1)}`)
+      ctx.log(`自动续跑触发 ${ctx.receipts(m).filter((d) => RE_AUTO_CONTINUE.test(d)).length} 次`)
+    },
+  },
+
+  // 停摆回执 + 恢复激活（0.5.0 的核心契约）：
+  //  - 预算命中要**落进会话转录**（`resume: false` 时它只会烂在收件箱里，人和模型都看不到）
+  //  - `/goal-resume` 在预算不足时必须**拒绝**（恢复了下一轮末也会被打回 budget-limited）
+  //  - 预算改回可用时必须回 active **并激活**（否则「active 却没人跑」，而 resume 又拒绝 → 死路）
+  "budget-stop-resume": {
+    title: "预算停摆回执落转录 + /goal-resume 预算门槛 + 改预算后激活",
+    run: async (ctx) => {
+      await ctx.clearGoal()
+      await sendGoal(
+        ctx.sid,
+        "Count from 1 to 100 in order: each reply outputs exactly one number and nothing else, until 100 is reached.",
+      )
+      // 目标由模型在 /goal 那一轮里创建，必须**轮询**等它出现（别用固定 sleep）。
+      const active = await ctx.waitStatus("active", 120000)
+      check(active, "目标应进入 active（模型已用 goal 工具创建）")
+
+      await control(ctx.sid, "budget", "1")
+      // 快速失败护栏：命令没把预算写进去（例如传参丢了）要立刻报，而不是空等到超时。
+      const wrote = await waitFor(
+        "budget-set",
+        async () => {
+          const g = await ctx.goal()
+          return g?.tokenBudget === 1 || g?.status === "budget-limited" ? g : undefined
+        },
+        { timeout: 30000, interval: 1500 },
+      )
+      check(wrote, "预算=1 应写进目标记录（失败通常意味着命令参数没送到）")
+      const limited = await ctx.waitStatus("budget-limited", 180000)
+      check(limited, "把预算设到已用量之下应进入 budget-limited")
+
+      // 停摆回执必须真的落进会话转录（投递过才有这条消息行）。
+      const stop = await waitFor(
+        "stop-notice",
+        async () =>
+          (await ctx.messages()).find((x) => x.type === "synthetic" && RE_BUDGET_STOP.test(x.description ?? "")),
+        { timeout: 120000 },
+      )
+      check(stop, "停摆回执应出现在会话消息里（人和模型都看得到）")
+      ctx.log(`停摆回执：${stop.description}`)
+
+      // /goal-resume：预算不足 → 拒绝（状态不变、不唤醒）
+      await control(ctx.sid, "resume")
+      await sleep(8000)
+      const afterResume = await ctx.goal()
+      check(afterResume.status === "budget-limited", `预算不足时 resume 不应改状态，实际 ${afterResume.status}`)
+      check(
+        (afterResume.continuations ?? 0) === (limited.continuations ?? 0),
+        "预算不足时 resume 不应唤醒模型（续跑计数不该变）",
+      )
+
+      // 改大预算 → 回 active 并激活（续跑计数增加）
+      await control(ctx.sid, "budget", String(limited.tokensUsed + 300000))
+      const reactivated = await waitFor(
+        "reactivated",
+        async () => {
+          const g = await ctx.goal()
+          return g?.status === "active" && (g.continuations ?? 0) > (limited.continuations ?? 0) ? g : undefined
+        },
+        { timeout: 120000 },
+      )
+      check(reactivated, "改大预算后应回 active 并被激活（续跑计数增加）")
+      ctx.log(`改预算后已激活：continuations ${limited.continuations} → ${reactivated.continuations}`)
+
+      await ctx.clearGoal()
     },
   },
 
@@ -575,6 +665,8 @@ const ctxBase = {
   events,
   log: (m) => console.log(`    · ${m}`),
   goal: async (sid = sessionID) => (await readGoals(sid))[0]?.goal,
+  /** 会话转录（用于断言「停摆回执真的落进了会话」与「命令回执不写会话消息」）。 */
+  messages: async () => (await api("session.message.list", { params: { sessionID } })).data ?? [],
   receipts: (from) => events.descriptions(from, sessionID),
   evCount: (type, from) => events.count(type, from, sessionID),
   clearGoal: async () => { await control(sessionID, "clear").catch(() => {}); await sleep(1500) },
