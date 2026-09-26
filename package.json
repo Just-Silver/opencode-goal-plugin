@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-goal-plugin",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "Codex/OMP-style persistent goals for OpenCode V2: /goal command + goal tool + idle auto-continuation + evidence-based completion + blocked/budget guards",
   "license": "MIT",
