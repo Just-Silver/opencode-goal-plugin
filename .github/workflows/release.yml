@@ -62,8 +62,11 @@ jobs:
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            echo "::notice::workflow_dispatch = 预检，只跑 npm publish --dry-run（不发布）"
-            npm publish --dry-run
+            # 预检：只打包，不发布。
+            # 注意别用 `npm publish --dry-run`——它仍会向 registry 做「重复版本」校验，
+            # 当前版本已发布时会直接报 `You cannot publish over the previously published versions`。
+            echo "::notice::workflow_dispatch = 预检，只跑 npm pack --dry-run（不发布、不访问 registry）"
+            npm pack --dry-run
             exit 0
           fi
           if npm view "${name}@${version}" version >/dev/null 2>&1; then
