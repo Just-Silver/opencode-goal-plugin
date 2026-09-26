@@ -1,5 +1,6 @@
-import { GoalError, pause as pauseGoal, resume as resumeGoal } from "../model/goal"
+import { GoalError, pause as pauseGoal, rebuild as rebuildGoal, resume as resumeGoal } from "../model/goal"
 import { setBudget } from "../model/limits"
+import { normalizeObjective } from "../model/objective"
 import type { Goal } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
 import { goalCommandPrompt } from "../prompts/index"
@@ -66,6 +67,8 @@ export interface GoalCommandHandlers {
   readonly clear: (sessionID: string) => Promise<void>
   /** `${name}-budget`：零 token 地改/清空当前目标的预算。 */
   readonly budget: (sessionID: string, text: string) => Promise<void>
+  /** `${name}-rebuild`：零 token 地替换当前目标的正文（状态、预算与全部记账原样保留）。 */
+  readonly rebuild: (sessionID: string, text: string) => Promise<void>
 }
 
 /** 命令面的确定性入口：全部零 token、零歧义；只有 `/goal <目标>` 会转发给模型。 */
@@ -149,6 +152,25 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     )
   }
 
+  const rebuild = async (sessionID: string, text: string): Promise<void> => {
+    const trimmed = text.trim()
+    if (trimmed.length === 0) return port.notify(sessionID, deps.messages["notice.rebuildUsage"])
+    const existing = await deps.repo.load(sessionID)
+    if (!existing) return port.notify(sessionID, deps.messages["notice.noGoal"])
+    if (existing.status === "complete")
+      return port.notify(
+        sessionID,
+        format(deps.messages["notice.nothingToRebuild"], { status: statusLabel(deps.messages, existing.status) }),
+      )
+    const check = normalizeObjective(trimmed, deps.options.maxObjectiveChars)
+    if (!check.ok) return port.notify(sessionID, deps.messages["notice.rebuildUsage"])
+    await deps.repo.save(sessionID, rebuildGoal(existing, check.objective, deps.now()))
+    return port.notify(
+      sessionID,
+      format(deps.messages["notice.rebuilt"], { status: statusLabel(deps.messages, existing.status) }),
+    )
+  }
+
   return {
     goal: async (input) => {
       const parsed = parseGoalCommand(input.prompt.text)
@@ -164,6 +186,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     resume,
     clear,
     budget,
+    rebuild,
   }
 }
 
@@ -181,14 +204,26 @@ function statusLine(goal: Goal, messages: Messages): string {
   const lastError = goal.lastError
     ? format(messages["status.lastError"], { error: goal.lastError.message || goal.lastError.type })
     : ""
+  const created = format(messages["status.created"], { time: localTime(goal.createdAt) })
   return format(messages["status.line"], {
     status: statusLabel(messages, goal.status),
     tokens: goal.tokensUsed,
     budget,
     detail,
+    created,
     seconds: goal.timeUsedSeconds,
     lastError,
     continuations,
     objective: goal.objective,
   })
+}
+
+function pad(value: number, width = 2): string {
+  return String(value).padStart(width, "0")
+}
+
+/** 本地墙钟时间 `YYYY-MM-DD HH:mm`（给人看，用本地时区而非 UTC）。 */
+function localTime(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }

@@ -173,8 +173,8 @@ describe("createCommandHandlers", () => {
       }),
     })
     await handlers.status("ses_1")
-    expect(notices[0]).toContain("tokens 160")
-    expect(notices[0]).toContain("cacheRead 50")
+    expect(notices[0]).toContain("tokens used: 160")
+    expect(notices[0]).toContain("cache read 50")
   })
 
   test("a storage error while resuming propagates instead of being reported as not-resumable", async () => {
@@ -209,6 +209,7 @@ describe("createCommandHandlers", () => {
     })
     await handlers.status("ses_1")
     expect(notices[0]).not.toMatch(/\{[a-zA-Z]+\}/)
+    expect(notices[0]).toContain("created ")
     expect(notices[0]).toContain("new work")
     expect(notices[0]).toContain("last error: limit")
   })
@@ -284,5 +285,57 @@ describe("budget command", () => {
     await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
     await handlers.budget("ses_1", "101")
     expect(notices.at(-1)).toContain("max_goal_token_budget 100")
+  })
+})
+
+describe("rebuild command", () => {
+  test("empty objective reports usage and a missing goal reports absence, touching no model turn", async () => {
+    const { handlers, notices, prompts } = makeHandler()
+    await handlers.rebuild("ses_1", "   ")
+    expect(notices.at(-1)).toContain("Usage")
+
+    await handlers.rebuild("ses_1", "anything")
+    expect(notices.at(-1)).toContain("No goal")
+    expect(prompts).toHaveLength(0)
+  })
+
+  test("rewrites only the objective and preserves status, budget and accounting", async () => {
+    const { deps, handlers, notices, prompts } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "old", now: 0, tokenBudget: 500 }),
+      status: "paused" as const,
+      tokensUsed: 42,
+      usage: { input: 10, output: 20, reasoning: 0, cacheRead: 12, cacheWrite: 0 },
+      timeUsedSeconds: 7,
+      continuations: 3,
+    })
+
+    await handlers.rebuild("ses_1", "  new objective  ")
+
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.objective).toBe("new objective")
+    expect(goal?.status).toBe("paused")
+    expect(goal?.tokenBudget).toBe(500)
+    expect(goal?.tokensUsed).toBe(42)
+    expect(goal?.usage).toEqual({ input: 10, output: 20, reasoning: 0, cacheRead: 12, cacheWrite: 0 })
+    expect(goal?.timeUsedSeconds).toBe(7)
+    expect(goal?.continuations).toBe(3)
+    expect(goal?.createdAt).toBe(0)
+    expect(goal?.updatedAt).toBe(1000)
+    expect(prompts).toHaveLength(0)
+    expect(notices.at(-1)).toContain("rebuilt")
+  })
+
+  test("refuses a completed goal and leaves it untouched", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "old", now: 0 }),
+      status: "complete" as const,
+    })
+
+    await handlers.rebuild("ses_1", "new")
+
+    expect((await deps.repo.load("ses_1"))?.objective).toBe("old")
+    expect(notices.at(-1)).toContain("cannot rebuild")
   })
 })

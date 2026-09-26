@@ -71,6 +71,11 @@ export function complete(goal: Goal, now: number): Goal {
   return next(goal, "complete", now)
 }
 
+/** 重建目标正文（用户命令）：只替换 objective，状态、预算与全部记账原样保留，仅刷新 updatedAt。 */
+export function rebuild(goal: Goal, objective: string, now: number): Goal {
+  return { ...goal, objective, updatedAt: now }
+}
+
 /**
  * 落账一次自动续跑：计数 +1，并刷新 `lastContinuationAt` / `updatedAt`。
  * 口径 = 目标生命周期累计：`resume` / 暂停 / 各种停下都不重置。

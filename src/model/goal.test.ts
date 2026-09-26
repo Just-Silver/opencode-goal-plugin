@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { GoalError, complete, createGoal, pause, recordContinuation, resume } from "./goal"
+import { GoalError, complete, createGoal, pause, rebuild, recordContinuation, resume } from "./goal"
 
 const base = { goalId: "g1", objective: "finish the thing", now: 1000 }
 
@@ -90,6 +90,18 @@ describe("transitions", () => {
     const paused = pause(done, 3000)
     expect(paused.status).toBe("complete")
     expect(paused.updatedAt).toBe(2000)
+  })
+
+  test("rebuild replaces the objective and keeps status and counters", () => {
+    const started = { ...goal, tokensUsed: 5, continuations: 2, status: "paused" as const }
+    const rebuilt = rebuild(started, "new objective", 9000)
+    expect(rebuilt.objective).toBe("new objective")
+    expect(rebuilt.status).toBe("paused")
+    expect(rebuilt.tokensUsed).toBe(5)
+    expect(rebuilt.continuations).toBe(2)
+    expect(rebuilt.createdAt).toBe(1000)
+    expect(rebuilt.updatedAt).toBe(9000)
+    expect(started.objective).toBe("finish the thing")
   })
 })
 

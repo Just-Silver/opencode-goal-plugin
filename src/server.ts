@@ -100,6 +100,11 @@ export default {
         execute: async (input) => handlers.budget(input.sessionID, input.prompt.text),
       })
       editor.add({
+        name: `${name}-rebuild`,
+        description: messages["cmd.rebuild"],
+        execute: async (input) => handlers.rebuild(input.sessionID, input.prompt.text),
+      })
+      editor.add({
         name: options.debugCommandName,
         description: messages["cmd.debug"],
         execute: async (input) => {

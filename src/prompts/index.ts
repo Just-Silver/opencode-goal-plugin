@@ -127,7 +127,7 @@ Decide whether this is actionable:
 - If it is specific enough (a clear success criterion, a way to verify it, and a bounded scope), normalize it into a concrete objective and call goal with op "create".
 - If it is not specific enough, ask focused clarifying questions first (one at a time, at most six), then call goal with op "create" once you have enough.
 
-Call goal with op "create" only when the user explicitly asked for a goal. Do not set or change a token budget unless the user explicitly gave one.`
+Call goal with op "create" only when the user explicitly asked for a goal. Do not set or change a token budget unless the user explicitly gave one. Ask all clarifying questions before creating the goal, not after.`
 }
 
 export function blockedWrapUp(goal: Goal): string {

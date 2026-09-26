@@ -9,6 +9,7 @@ export interface Messages {
   readonly "cmd.clear": string
   readonly "cmd.debug": string
   readonly "cmd.budget": string
+  readonly "cmd.rebuild": string
   readonly "notice.noGoal": string
   readonly "notice.paused": string
   readonly "notice.resumed": string
@@ -20,6 +21,9 @@ export interface Messages {
   readonly "notice.budgetUsage": string
   readonly "notice.budgetInvalid": string
   readonly "notice.budgetExceedsMax": string
+  readonly "notice.rebuildUsage": string
+  readonly "notice.rebuilt": string
+  readonly "notice.nothingToRebuild": string
   readonly "label.goalRequest": string
   readonly "label.autoContinue": string
   readonly "status.active": string
@@ -29,6 +33,7 @@ export interface Messages {
   readonly "status.usage-limited": string
   readonly "status.complete": string
   readonly "status.line": string
+  readonly "status.created": string
   readonly "status.budget": string
   readonly "status.noBudget": string
   readonly "status.continuations": string
