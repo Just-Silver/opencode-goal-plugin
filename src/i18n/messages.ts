@@ -40,6 +40,7 @@ export interface Messages {
   readonly "status.complete": string
   readonly "status.line": string
   readonly "status.created": string
+  readonly "status.completed": string
   readonly "status.budget": string
   readonly "status.noBudget": string
   readonly "status.continuations": string

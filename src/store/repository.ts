@@ -42,6 +42,10 @@ export function decodeGoal(value: unknown): Goal | undefined {
     delete copy.lastError
     dirty = true
   }
+  if (copy.completedAt !== undefined && typeof copy.completedAt !== "number") {
+    delete copy.completedAt
+    dirty = true
+  }
   return dirty ? (copy as unknown as Goal) : (value as Goal)
 }
 

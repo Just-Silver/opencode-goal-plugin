@@ -66,9 +66,10 @@ export function resume(goal: Goal, now: number): Goal {
   })
 }
 
+/** 完成：唯一写入 `completedAt` 的地方（展示用；模型侧不读它）。 */
 export function complete(goal: Goal, now: number): Goal {
   if (goal.status !== "active") throw new GoalError("not-completable", `not-completable: cannot complete a ${goal.status} goal`)
-  return next(goal, "complete", now)
+  return next(goal, "complete", now, { completedAt: now })
 }
 
 /** 重建目标正文（用户命令）：只替换 objective，状态、预算与全部记账原样保留，仅刷新 updatedAt。 */

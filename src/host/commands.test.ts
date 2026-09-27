@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_OPTIONS } from "../config"
 import { messagesFor } from "../i18n"
-import { createGoal, pause } from "../model/goal"
+import { complete, createGoal, pause } from "../model/goal"
 import { createRepository, type Repository, type StorageLike } from "../store/repository"
 import { createCommandHandlers, parseBudgetArg, parseGoalCommand } from "./commands"
 import type { GoalDeps } from "./deps"
@@ -248,6 +248,28 @@ describe("createCommandHandlers", () => {
     await handlers.status("ses_1")
     expect(notices[0]).toContain("(2d ago)")
     expect(notices[0]).toContain("active work 2h 5m")
+  })
+
+  test("a completed goal shows its completion time; open and legacy records do not", async () => {
+    const { deps, handlers, notices } = makeHandler()
+    // 本地时区渲染 → 只校验格式，避免断言依赖机器时区。
+    await deps.repo.save("ses_1", complete(createGoal({ goalId: "g1", objective: "o", now: 0 }), 60_000))
+    await handlers.status("ses_1")
+    expect(notices[0]).toContain("(complete)")
+    expect(notices[0]).toMatch(/completed \d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+
+    // 旧记录：状态是 complete 但没有 completedAt → 不做兜底，不显示完成时间。
+    await deps.repo.save("ses_1", {
+      ...createGoal({ goalId: "g1", objective: "o", now: 0 }),
+      status: "complete" as const,
+    })
+    await handlers.status("ses_1")
+    expect(notices.at(-1)).not.toContain("completed")
+
+    // 未完成的目标不显示完成时间。
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    await handlers.status("ses_1")
+    expect(notices.at(-1)).not.toContain("completed")
   })
 
   test("an empty /goal and /goal-status render the same status line", async () => {

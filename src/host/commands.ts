@@ -255,12 +255,19 @@ function statusLine(goal: Goal, messages: Messages, now: number): string {
     time: localTime(goal.createdAt),
     elapsed: formatDuration(messages, (now - goal.createdAt) / 1000),
   })
+  // 完成时刻：只在「已完成」且记录了 `completedAt` 时显示（旧记录没有该字段 → 空串，不留占位符）。
+  // 不用 `updatedAt` 兜底：改预算等操作也会刷新它，拿它当完成时刻会误导。
+  const completed =
+    goal.status === "complete" && goal.completedAt !== undefined
+      ? format(messages["status.completed"], { time: localTime(goal.completedAt) })
+      : ""
   return format(messages["status.line"], {
     status: statusLabel(messages, goal.status),
     tokens: formatTokens(goal.tokensUsed),
     budget,
     detail,
     created,
+    completed,
     duration: formatDuration(messages, goal.timeUsedSeconds),
     lastError,
     continuations,

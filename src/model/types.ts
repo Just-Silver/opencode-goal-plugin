@@ -43,6 +43,8 @@ export interface Goal {
   readonly continuations?: number
   readonly createdAt: number
   readonly updatedAt: number
+  /** 完成时刻（`complete()` 写入）；旧记录没有该字段 → 状态行不显示完成时间。 */
+  readonly completedAt?: number
 }
 
 /** 未结束（存在即视为“有目标”），只有 complete 是终态。 */

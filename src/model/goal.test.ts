@@ -43,7 +43,9 @@ describe("transitions", () => {
   })
 
   test("complete only from active", () => {
-    expect(complete(goal, 3000).status).toBe("complete")
+    const done = complete(goal, 3000)
+    expect(done.status).toBe("complete")
+    expect(done.completedAt).toBe(3000)
     expect(() => complete(pause(goal, 2000), 3000)).toThrow(/not-completable/)
   })
 
