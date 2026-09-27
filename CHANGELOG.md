@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-27
+
+### Added
+
+- **`/goal-status` 增加完成时刻**：目标进入「已完成」后，状态行在「创建于 …」之后多一段「`完成于 YYYY-MM-DD HH:mm`」（英文 ` · completed …`）。完成时刻由 `complete()` 写入新增的 `completedAt` 字段，**只走 TUI 回执、不进模型上下文**（工具返回的 `GoalView` 不含该字段）。旧记录没有 `completedAt` → **不做兜底、不显示**（`/goal-budget` 等操作也会刷新 `updatedAt`，拿它当完成时刻会误导）；`decodeGoal` 对形状不对的 `completedAt` 按既有约定丢弃该字段、保留目标。
+
 ## [0.7.1] - 2026-09-27
 
 ### Changed
