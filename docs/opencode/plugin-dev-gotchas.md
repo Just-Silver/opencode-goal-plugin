@@ -33,6 +33,7 @@
 | 19 | 配置安装的包，TUI 入口会被**自动纳入加载** | server 清单里 `features.tui === true` 的包，TUI **无需写 `cli.json`** 即加载其 `exports["./tui"]`；本地目录插件找 `<dir>/tui.ts(x)`（2026-09-26 真机实测） |
 | 20 | `ui.dialog.alert` **不可滚、不按会话过滤**；`ui.toast` 也不可滚 | alert 正文是普通 `<text>`、容器无 scrollbox（`ui/dialog-alert.tsx`）；两者都是**客户端全局**，而 RPC 事件会广播到同一 location 下**所有** TUI 客户端 → 必须自己按 `ui.router.current()` + `data.session.root()` 过滤。toast 没有 `maxHeight`，超长会超屏被硬裁（2026-09-26 真机实测） |
 | 21 | 会话有**暂存回退**（revert 预览未提交）时 `synthetic(resume:true)` **不唤醒** | 宿主有意为之：synthetic 被视为「可能过期的服务端消息」，回退期间不拉起、提交后丢弃（有测试锁定）。用户显式发起的新工作（`/goal`、`/goal-resume`）要改走 `prompt`——它会**先提交回退再唤醒**。详见 §12 |
+| 22 | `question` 工具会**挂起执行 → 停摆续跑** | 续跑在**轮末**注入，question 让轮永不结束。解法：`context` 钩子里 `delete event.tools["question"]`（只改当次请求、不落库）；V2 promise 的 `tool.hook("execute.before")` **不能 fail**，生态里 V1 的 `throw` 阻止模式不可照搬。详见 §13 |
 
 ---
 
@@ -423,3 +424,14 @@ Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -P
 - **正确做法（治本）**：用户**显式发起**的新工作（`/goal <目标>` 与 `/goal-resume` 的激活投递）在投递前先探测会话是否挂着 revert；**有则改走 `ctx.session.prompt`**（它会先 commit 回退、再 wake），无则照旧 `synthetic`（保持 TUI 只显示一行的干净显示）。`prompt` 没有 `description`，整段 prompt 会进转录，所以只在回退这一罕见分支付出显示代价；同时发一条 toast（`notice.revertCommitted`）告知「已代其提交未完成的回退」——**提交回退有破坏性副作用**（丢弃回退点之后的消息、还原文件快照），不能静默。落地见 `src/server.ts` 的 `deliver`。
 - **规避（不升级插件时）**：在 TUI 里把那个 revert 预览 **commit 或 clear**（或随便发一条普通消息，宿主会自动 commit），`/goal` 立即恢复。
 - **注意**：插件 API 的 `SessionDomain` **不暴露 revert 方法**（无 `revert.commit/clear`），所以插件无法自己清回退，只能改用 `prompt` 这条会顺带提交回退的通道。
+
+## 13. goal active 期间移除阻塞式交互工具（`question`）：`context` 钩子的 `tools` 可裁剪
+
+- **问题**：goal 的自动续跑在**轮末**（`session.execution.succeeded`）注入。而 `question` 是**阻塞式**工具——调用后执行挂起、等用户回复，轮**永不结束** → 续跑永不触发 → goal 无限期停摆。这不是「状态变成 blocked」，是执行层真的卡死（用户不答就一直挂着）。
+- **参考实现为何没这个问题**：Codex 的提问是 assistant message 的 `questions` 字段（`accounting.rs:173` 把它算作活动），属 turn 正常输出、不阻塞；OMP 的提问是**纯文本回复后停止**（`guided-goal-interview.md`：*"Exactly one concise question/reply; then stop for answer. While interviewing: no tool calls"*）。它们的提问天然不阻塞。opencode 的 `question` 是工具调用，会阻塞。
+- **正确做法（V2）**：`ctx.session.hook("context")` 的入参 `event.tools` 是**本次请求的工具表且可变**——`delete event.tools["question"]` 即让这次请求的模型看不到该工具。官方文档（`opencode.ai/v2/docs/build/plugins`）示例就是 `delete event.tools.write`，并注明 *"Changes affect only the outgoing model call, not persisted history or configuration."* 落地在 `src/host/hooks.ts` 的 `createContextHook`（active 时按 `options.disabledTools` 删，默认 `["question"]`）。
+- **为什么不用 tool hook**：V2 promise 的 `ctx.tool.hook("execute.before")` 回调类型是 `(input) => Promise<void> | void`，**不能 fail**（`@opencode/plugin/dist/promise/registration.d.ts`；只有 **effect 版** 能 fail `Tool.Error`）。所以生态里 V1 的 `tool.execute.before` + `throw` 阻止模式——`bravohenry/ohmymkt` 的 `subagent-question-blocker`、`xcodeassociated/opencode-config` 的 `nested-question-guard`、`HiAi-gg/hiai-opencode` 的 `host-interaction-gate`（三者都靠 throw 把 question 挡下、把错误文本回给模型自我纠正）——**不能照搬**到本项目。
+- **为什么不用 `tool.transform` 的 `remove`**：transform 回调**没有 session 上下文**，是全局注册期操作 → 会禁掉所有会话的 question，而不只是 goal 期间。
+- **缓存影响**：只改当次请求、不落库；`active` 期间每轮稳定地少同一个键 → **不额外击穿** prompt-cache。tools 断点变化只在 goal **启停**时发生一次（与 `goalContext` 注入 system 的那次同频），见 `prompt-cache.md` §4 的「tools 也会变」。
+- **提示词配合**：`goalContext` 的 `Autonomy` 段（`src/prompts/index.ts`）告诉模型工具不可用、不要停等、需要输入时走 `goal(op "block", blocker_key=...)`。硬删是保证，提示词是行为引导，二者互补。
+- **生态现状**：现有 goal 插件都没处理这个——`prevalentWare/opencode-goal-plugin`（V2）与 `william-ricchiuti/OpenCode-goal-plugin`（V1）的防护都是 `noProgressTurnsBeforePause` / `noToolCallTurnsBeforePause`，**依赖轮次结束**；而 question 让轮永不结束，这些启发式全部失效。

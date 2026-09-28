@@ -24,6 +24,11 @@ ${injectedObjective(goal, options.maxObjectiveChars)}
 
 This goal persists across turns: ending a turn does not end it, and it does not require shrinking the objective to what fits now. While the status is "active", keep making concrete progress toward the real requested end state. Every state change goes through the goal tool ("create" / "complete" / "block" / "resume" / "drop" / "budget").
 
+Autonomy:
+- The question tool is unavailable while this goal is active; never call it. It suspends execution until a human replies, which stalls the goal indefinitely.
+- Do not end a turn waiting for the user. When something is missing or ambiguous, make the most reasonable assumption, state it in one line, and continue. Prefer progress over confirmation.
+- Report goal(op "block", blocker_key=...) only at a genuine impasse that no reasonable assumption can resolve. A question written in prose does not pause the goal, so it is not a substitute for deciding or for reporting a blocker.
+
 Work from evidence:
 Use the current worktree and external state as authoritative. Previous conversation context can help locate relevant work, but inspect the current state before relying on it. Improve, replace, or remove existing work as needed to satisfy the actual objective.
 

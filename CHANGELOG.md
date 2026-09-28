@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-28
+
+### Added
+
+- **goal `active` 期间禁用阻塞式提问工具**：`question` 是**阻塞式**交互工具——调用后执行挂起直到用户回复，而 goal 的自动续跑只在**轮末**注入，于是 goal 会被**无限期停摆**（不是状态变 blocked，是执行层真卡死）。现在 goal `active` 时从**当次模型请求**的工具表移除 `question`（走 `context` 钩子的 `tools`：`delete event.tools[name]`，只影响该次请求、不落库，官方文档示例即 `delete event.tools.write`），并新增配置项 `disabled_tools`（默认 `["question"]`，设 `[]` 关闭）。同时在 `goalContext` 增加 `Autonomy` 段：明确工具不可用、不要停下等用户、缺信息先自行合理假设、真卡住走 `goal(op "block", blocker_key=…)`。**硬删是保证、提示词是行为引导**，二者互补。缓存上只在 goal 启停时让 tools 断点失效一次（与 goalContext 注入 system 同频），`active` 期间稳定。详见 `docs/opencode/plugin-dev-gotchas.md` §13。
+
 ## [0.7.3] - 2026-09-28
 
 ### Fixed

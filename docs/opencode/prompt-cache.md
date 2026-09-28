@@ -142,6 +142,24 @@ Budget:
 - **别把「稳定」理解成「文本短」**：`objective` 即使很长，只要不变，放 system 反而最划算（被缓存）。
 - **边界**：宿主自身可能在其他 system part 里放动态内容（如环境/时间）；那是宿主的事，你控制不了，但你至少别**再往里加**。
 
+### 4.1 本项目（opencode-goal）的失效触发清单（2026-09-28 审计）
+
+本插件只通过 `session.hook("context")` 触碰请求前缀（`src/host/hooks.ts`），只有三处会改变 tools/system：
+
+1. **`goalContext` 注入 / 移除** —— 由 `status === "active"` 决定（`hooks.ts:26`）；
+2. **`disabledTools`（默认 `question`）删除 / 恢复** —— 同一条件（`hooks.ts:29`）；
+3. **objective 文本变化** —— `/goal-rebuild` 或替换目标。
+
+1 与 2 **同频同时刻** → 不增加失效次数（2 只是把重算范围从 system 尾扩到 tools 断点）。触发时机 = **goal 状态切换**：创建 / `complete` / pause / resume / `blocked` / `budget-limited` / `usage-limited` / objective 更新。**`active` 期间每轮逐字节稳定，不击穿。**
+
+`compactionSnapshot` 注入的是 **compaction 请求**的 system（含 `Status:`，动态），但压缩是独立请求且压缩本身替换上下文 → **不影响主循环**逐轮缓存。
+
+其余全部走断点之后或不经上下文：续跑触发 / 停摆回执 / goal 工具返回 / `/goal` 转发 → messages；命令回执 → RPC toast。插件不改 agent / model / `event.options`。
+
+> 注意 `context` 钩子**每个 step 都跑并读最新 goal**：模型在同一轮内调用 `complete`/`block` 之后，该轮后续 step 会立即失去 goalContext 并恢复 `question` —— 这仍是「状态切换」（低频），不是每轮。
+>
+> 待真机确认：`question` 是否也经 **Code Mode 目录**（`codemode: true`）暴露；若是，只删 `event.tools["question"]` 可能不足以禁用它。
+
 ---
 
 ## 5. 怎么验证（可复用的实测方法）

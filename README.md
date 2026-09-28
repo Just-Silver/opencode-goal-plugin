@@ -66,10 +66,13 @@
 | `empty_threshold` | 3 | 连续空转多少轮算「空转」 |
 | `reconcile_guard_minutes` | 5 | 启动兜底保护窗（分钟） |
 | `restricted_agents` | `["plan"]` | 受限 agent（拒创建 / 续跑 / resume） |
+| `disabled_tools` | `["question"]` | goal `active` 期间从模型工具表移除的工具名；设 `[]` 关闭 |
 | `command_name` | `goal` | 主命令名；状态控制是派生命令 `<name>-status` / `-pause` / `-resume` / `-clear` |
 | `debug_command_name` | `goal-debug` | 调试命令名 |
 | `debug` | `true` | 注册只读调试工具 `goal_debug`（设 `false` 可让模型工具表保持干净） |
 | `language` | 跟随系统 | 面向用户文案的语言，`"zh-CN"` 或 `"en"`（缺省用系统 locale 探测） |
+
+> `disabled_tools` 默认移除 `question`：它是**阻塞式**交互工具，一旦调用会挂起执行直到你回复，而 goal 的自动续跑只在轮末注入，于是 goal 会被**无限期停摆**。goal `active` 时模型改为：能自行合理假设就继续，确实需要外部输入则走 `goal(op "block")`（连续几轮后进入「受阻」）。移除只作用于当次模型请求、不落库；goal 暂停 / 受阻 / 完成后 `question` 自动恢复。
 
 ---
 

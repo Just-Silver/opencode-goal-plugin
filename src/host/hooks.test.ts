@@ -54,6 +54,33 @@ describe("createContextHook", () => {
     await hook(paused)
     expect(paused.system).toHaveLength(0)
   })
+
+  test("removes disabled tools from the request tool table only while active", async () => {
+    const deps = makeDeps()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "o", now: 0 }))
+    const hook = createContextHook(deps)
+
+    const active = {
+      sessionID: "ses_1",
+      agent: "build",
+      system: [] as { type: "text"; text: string }[],
+      tools: { question: {}, read: {} } as Record<string, unknown>,
+    }
+    await hook(active)
+    // question 是阻塞式工具：active 期间必须从当次请求的工具表移除，否则会挂起执行、停摆续跑。
+    expect(active.tools).toEqual({ read: {} })
+
+    await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "o", now: 0 }), status: "paused" })
+    const paused = {
+      sessionID: "ses_1",
+      agent: "build",
+      system: [] as { type: "text"; text: string }[],
+      tools: { question: {}, read: {} } as Record<string, unknown>,
+    }
+    await hook(paused)
+    // 非 active：工具表原样保留，用户重新掌控后仍可被提问。
+    expect(paused.tools).toEqual({ question: {}, read: {} })
+  })
 })
 
 describe("createCompactionHook", () => {

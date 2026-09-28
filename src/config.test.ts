@@ -22,6 +22,17 @@ describe("resolveOptions", () => {
     expect(() => resolveOptions({ restricted_agents: "plan" })).toThrow(/restricted_agents/)
   })
 
+  test("disabled_tools defaults to question and can be overridden or emptied", () => {
+    expect(DEFAULT_OPTIONS.disabledTools).toEqual(["question"])
+    expect(resolveOptions({}).disabledTools).toEqual(["question"])
+    expect(resolveOptions({ disabled_tools: ["question", "other"] }).disabledTools).toEqual(["question", "other"])
+    expect(resolveOptions({ disabled_tools: [] }).disabledTools).toEqual([])
+  })
+
+  test("rejects a malformed disabled_tools", () => {
+    expect(() => resolveOptions({ disabled_tools: "question" })).toThrow(/disabled_tools/)
+  })
+
   test("debug defaults on and can be turned off", () => {
     expect(DEFAULT_OPTIONS.debug).toBe(true)
     expect(DEFAULT_OPTIONS.debugCommandName).toBe("goal-debug")

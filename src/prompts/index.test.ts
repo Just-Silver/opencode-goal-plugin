@@ -31,6 +31,13 @@ describe("goalContext", () => {
     expect(text).toContain('op "get"')
   })
 
+  test("forbids the blocking question tool and names the blocker escape hatch", () => {
+    const text = goalContext(goal, { maxObjectiveChars: 4000 })
+    expect(text).toContain("Autonomy")
+    expect(text).toContain("question tool is unavailable")
+    expect(text).toContain('op "block"')
+  })
+
   test("is byte-identical when only volatile counters change (prompt-cache stability)", () => {
     const later = { ...goal, tokensUsed: 247365, timeUsedSeconds: 40, continuations: 7 }
     expect(goalContext(later, { maxObjectiveChars: 4000 })).toBe(goalContext(goal, { maxObjectiveChars: 4000 }))
