@@ -30,6 +30,7 @@ const en = {
   "notice.rebuildUsage": "Usage: provide a non-empty objective.",
   "notice.rebuilt": "Goal rebuilt ({status}); accounting preserved.",
   "notice.nothingToRebuild": "Goal is {status}; cannot rebuild it.",
+  "notice.revertCommitted": "A pending revert was committed to start the goal.",
   "label.goalRequest": "Goal request",
   "label.autoContinue": "Goal auto-continue #{count}",
   "status.active": "active",

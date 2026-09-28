@@ -21,6 +21,7 @@ function mockCtx(get: () => Promise<unknown>) {
   const tools: Array<{ name: string; options?: { codemode?: boolean } }> = []
   const hooks: string[] = []
   const synthetic: Array<Record<string, unknown>> = []
+  const prompts: Array<Record<string, unknown>> = []
   const notices: Array<{ name: string; data: Record<string, unknown> }> = []
   const storage = {
     async get(key: string) {
@@ -67,6 +68,10 @@ function mockCtx(get: () => Promise<unknown>) {
         synthetic.push(input)
         return {}
       },
+      prompt: async (input: Record<string, unknown>) => {
+        prompts.push(input)
+        return {}
+      },
       get,
     },
     event: {
@@ -83,7 +88,7 @@ function mockCtx(get: () => Promise<unknown>) {
       }),
     },
   }
-  return { store, removed, commands, tools, hooks, synthetic, notices, ctx }
+  return { store, removed, commands, tools, hooks, synthetic, prompts, notices, ctx }
 }
 
 const missing = async (): Promise<unknown> => {
@@ -211,6 +216,29 @@ describe("server", () => {
     expect(notice.text).toContain("ship it")
     // 完整 prompt 只给模型（text）；TUI 只显示 description 一行。
     expect(notice.description).toBe("Goal request · ship it")
+
+    if (typeof cleanup === "function") await cleanup()
+  })
+
+  test("a staged revert routes the goal request through prompt so the session is actually woken", async () => {
+    // 会话停在「回退预览」（revert 已暂存、未提交）时，宿主不会因 synthetic 唤醒它
+    // （packages/core/test/session-prompt.test.ts: "holds synthetic input behind a staged revert"）。
+    // 此时必须走 prompt：它会先提交回退再唤醒（session.ts 的 commit → wake）。
+    const env = mockCtx(async () => ({ revert: { messageID: "msg_1", files: [] } }))
+    const cleanup = await plugin.setup(env.ctx as never)
+    const command = env.commands[0]
+
+    await command!.execute({ sessionID: "ses_1", prompt: { text: "ship it" } })
+
+    expect(env.synthetic).toHaveLength(0)
+    expect(env.prompts).toHaveLength(1)
+    const prompt = env.prompts[0] as { text?: string; resume?: boolean; sessionID?: string }
+    expect(prompt.resume).toBe(true)
+    expect(prompt.sessionID).toBe("ses_1")
+    expect(prompt.text).toContain("ship it")
+    // 提交回退有破坏性副作用（丢弃回退点之后的消息、还原文件），必须明确告知用户。
+    expect(env.notices.map((item) => item.name)).toContain("notice")
+    expect(String(env.notices[0]?.data.message)).toContain("revert")
 
     if (typeof cleanup === "function") await cleanup()
   })

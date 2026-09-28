@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-28
+
+### Fixed
+
+- **会话停在「回退预览」时 `/goal` 不再石沉大海**：会话有**暂存回退**（revert 已 stage、未 commit）时，宿主 `Session.synthetic` 按设计**不会唤醒**（回退期间视合成消息为可能过期、提交后丢弃，有测试锁定：`packages/core/test/session-prompt.test.ts` 的 *"holds synthetic input behind a staged revert"*）。于是 `/goal <目标>` 与 `/goal-resume` 的激活投递只会躺在收件箱里，真机表现就是「下了命令没任何反应」。现在这两条**用户显式发起**的投递在投递前探测 `session.revert`：有回退则改走 `ctx.session.prompt`（宿主会**先提交回退再唤醒**），无则照旧 `synthetic`（保持 TUI 只显示一行）；并额外发一条 toast 告知「已代其提交未完成的回退」（提交回退有破坏性副作用——丢弃回退点之后的消息、还原文件快照，不能静默）。详见 `docs/opencode/plugin-dev-gotchas.md` §12。
+
 ## [0.7.2] - 2026-09-27
 
 ### Added

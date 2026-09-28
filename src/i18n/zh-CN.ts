@@ -30,6 +30,7 @@ const zhCN = {
   "notice.rebuildUsage": "用法：提供一个非空的新目标。",
   "notice.rebuilt": "目标已重建（{status}）；用量记账保留。",
   "notice.nothingToRebuild": "目标当前为「{status}」，无法重建。",
+  "notice.revertCommitted": "检测到未完成的回退，已提交该回退并开始目标。",
   "label.goalRequest": "目标请求",
   "label.autoContinue": "目标自动续跑 #{count}",
   "status.active": "进行中",

@@ -52,12 +52,28 @@ export default {
       pendingUsage: (sessionID) => routerRef?.pendingUsage(sessionID),
     }
 
-    // 投递给模型的入口一律走 synthetic：TUI 只显示 `description` 一行（否则整段 prompt 会刷屏），
+    // 投递给模型的入口默认走 synthetic：TUI 只显示 `description` 一行（否则整段 prompt 会刷屏），
     // `text` 仍是模型收到的完整内容（`to-llm-message` 里 synthetic → role "user"）。
-    const deliver = (input: { sessionID: string; text: string; description: string }) =>
-      ctx.session
-        .synthetic({ sessionID: input.sessionID, text: input.text, description: input.description, resume: true })
-        .then(() => undefined)
+    //
+    // **例外：会话有「暂存回退」（revert 预览未提交）时必须改走 `prompt`。**
+    // 宿主对 synthetic 的约定是「revert 暂存期间不唤醒、提交后丢弃」（有意为之并有测试锁定：
+    // packages/core/test/session-prompt.test.ts 的 "holds synthetic input behind a staged revert"），
+    // 而 `prompt` 会**先提交回退再唤醒**（packages/core/src/session/session.ts 的 commit→wake）。
+    // 否则 `/goal` / `/goal-resume` 的合成消息只会躺在收件箱里，真机表现就是「下了命令没任何反应」。
+    const deliver = async (input: { sessionID: string; text: string; description: string }) => {
+      const session = await ctx.session.get({ sessionID: input.sessionID }).catch(() => undefined)
+      if (session?.revert) {
+        await ctx.session.prompt({ sessionID: input.sessionID, text: input.text, resume: true })
+        await notify(input.sessionID, messages["notice.revertCommitted"])
+        return
+      }
+      await ctx.session.synthetic({
+        sessionID: input.sessionID,
+        text: input.text,
+        description: input.description,
+        resume: true,
+      })
+    }
     // 纯回执：**不写会话消息**（0 token、不污染模型上下文），改为发 RPC 事件 → TUI 弹窗。
     // 无 TUI / RPC 不可用时静默（操作已生效）。见规格 §5/§7。
     const noticeRegistration = await ctx.rpc.register(GoalRpc, {}).catch((error) => {

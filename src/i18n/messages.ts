@@ -30,6 +30,7 @@ export interface Messages {
   readonly "notice.rebuildUsage": string
   readonly "notice.rebuilt": string
   readonly "notice.nothingToRebuild": string
+  readonly "notice.revertCommitted": string
   readonly "label.goalRequest": string
   readonly "label.autoContinue": string
   readonly "status.active": string

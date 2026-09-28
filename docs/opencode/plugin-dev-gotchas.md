@@ -32,6 +32,7 @@
 | 18 | RPC 事件回调是**包装对象** | payload 在 **`event.data`**（`RpcEventPayload = { type: "rpc.<id>.<name>", data: {…} }`）；直接读 `event.message` 得到 `undefined`（2026-09-26 真机踩坑） |
 | 19 | 配置安装的包，TUI 入口会被**自动纳入加载** | server 清单里 `features.tui === true` 的包，TUI **无需写 `cli.json`** 即加载其 `exports["./tui"]`；本地目录插件找 `<dir>/tui.ts(x)`（2026-09-26 真机实测） |
 | 20 | `ui.dialog.alert` **不可滚、不按会话过滤**；`ui.toast` 也不可滚 | alert 正文是普通 `<text>`、容器无 scrollbox（`ui/dialog-alert.tsx`）；两者都是**客户端全局**，而 RPC 事件会广播到同一 location 下**所有** TUI 客户端 → 必须自己按 `ui.router.current()` + `data.session.root()` 过滤。toast 没有 `maxHeight`，超长会超屏被硬裁（2026-09-26 真机实测） |
+| 21 | 会话有**暂存回退**（revert 预览未提交）时 `synthetic(resume:true)` **不唤醒** | 宿主有意为之：synthetic 被视为「可能过期的服务端消息」，回退期间不拉起、提交后丢弃（有测试锁定）。用户显式发起的新工作（`/goal`、`/goal-resume`）要改走 `prompt`——它会**先提交回退再唤醒**。详见 §12 |
 
 ---
 
@@ -407,3 +408,18 @@ Select-String -Path "$env:USERPROFILE\.local\share\opencode\log\opencode.log" -P
 - **正确做法**：需要让人/模型看到时用 **`resume: true`**——自己制造一次投递，代价是**一轮模型调用**。既然付了这一轮，就把 `text` 写成**收尾指令**（`src/prompts` 的 `stopWrapUpPrompt`，不本地化），而不是把给人看的文案塞给它；`description` 才是给人看、留在转录里的那一行（本地化，走 `src/i18n`）。
 - **顺带**：`/goal-status` 之类的**命令回执**不要走合成消息（会喂给模型、每轮计费）；走 RPC 事件 → TUI toast。
 - **实测（2026-09-26）**：`resume: true` 后两条路径都在真机通过——命令路径（预算设到已用量之下）与自然路径（轮末结算自然越界），均为「转录出现回执 + **恰好一轮**收尾 + 之后无续跑」。
+
+---
+
+## 12. 会话有「暂存回退」时 `synthetic(resume:true)` 不唤醒（`/goal` 石沉大海）
+
+- **现象（2026-09-28 真机）**：某会话里连续执行 `/goal …`（多次），**毫无反应**——既不弹 toast、也不起轮。查库：这些请求全部躺在 `session_inbox`（`delivery: "steer"`）里，累积 31 条，模型从未运行，KV 里也没有对应的 `goal:` 记录。
+- **根因（源码核实）**：该会话处于**回退预览**状态（`session_v2.revert` 非空，日志有 `session.revert.stage` 但无 `commit`/`clear`）。宿主 `Session.synthetic`（`packages/core/src/session/session.ts`）：
+  ```ts
+  if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.wake(sessionID)
+  ```
+  即 **revert 暂存期间 `resume: true` 也不会唤醒**。这不是 bug——宿主有意把 synthetic 当作「可能已过期的服务端消息」（后台任务完成通知等），回退期间不该把它拉起来；并有测试锁定：`packages/core/test/session-prompt.test.ts` 的 *"holds synthetic input behind a staged revert and discards it when committed"*（提交回退后这些 synthetic 会被**丢弃**）。
+- **对照**：宿主的 `Session.prompt`（`:166`）与 `Session.compact`（`:252`）在投递前都会**先提交暂存回退**再唤醒；只有 synthetic 不会。所以「用户打字」不受影响，只有 `/goal` 这条 synthetic 路径静默死掉。
+- **正确做法（治本）**：用户**显式发起**的新工作（`/goal <目标>` 与 `/goal-resume` 的激活投递）在投递前先探测会话是否挂着 revert；**有则改走 `ctx.session.prompt`**（它会先 commit 回退、再 wake），无则照旧 `synthetic`（保持 TUI 只显示一行的干净显示）。`prompt` 没有 `description`，整段 prompt 会进转录，所以只在回退这一罕见分支付出显示代价；同时发一条 toast（`notice.revertCommitted`）告知「已代其提交未完成的回退」——**提交回退有破坏性副作用**（丢弃回退点之后的消息、还原文件快照），不能静默。落地见 `src/server.ts` 的 `deliver`。
+- **规避（不升级插件时）**：在 TUI 里把那个 revert 预览 **commit 或 clear**（或随便发一条普通消息，宿主会自动 commit），`/goal` 立即恢复。
+- **注意**：插件 API 的 `SessionDomain` **不暴露 revert 方法**（无 `revert.commit/clear`），所以插件无法自己清回退，只能改用 `prompt` 这条会顺带提交回退的通道。
