@@ -1,9 +1,9 @@
-import { GoalError, pause as pauseGoal, rebuild as rebuildGoal, resume as resumeGoal } from "../model/goal"
+import { GoalError, createGoal, pause as pauseGoal, rebuild as rebuildGoal, resume as resumeGoal } from "../model/goal"
 import { setBudget } from "../model/limits"
 import { normalizeObjective } from "../model/objective"
-import type { Goal, StopReason } from "../model/types"
+import { isOpenStatus, type Goal, type StopReason } from "../model/types"
 import { newWorkOf, usageIsComplete, withPending } from "../model/usage"
-import { goalCommandPrompt } from "../prompts/index"
+import { continuationTrigger } from "../prompts/index"
 import { format, formatDuration, formatTokens, statusLabel, type Messages } from "../i18n/messages"
 import type { GoalDeps } from "./deps"
 import { noticeLine } from "./notice"
@@ -66,7 +66,7 @@ export interface CommandInput {
 }
 
 export interface GoalCommandHandlers {
-  /** `/goal <目标>`：空参报告状态，其余转发给模型。 */
+  /** `/goal <目标>`：空参报告状态，其余**直接创建目标**。 */
   readonly goal: (input: CommandInput) => Promise<void>
   /** `<name>-status`：服务端确定性报告（不唤醒模型；回执走 TUI toast，不写会话消息）。 */
   readonly status: (sessionID: string) => Promise<void>
@@ -98,6 +98,37 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
         ? statusLine(withPending(existing, deps.pendingUsage?.(sessionID)), deps.messages, deps.now())
         : deps.messages["notice.noGoal"],
     )
+  }
+
+  /**
+   * `/goal <目标>`：用户**直接**创建目标——不经模型、不追问、逐字保存。
+   * 已有未完成目标时不覆盖（改为提示用 `/goal-rebuild` 改正文或 `/goal-clear` 清除）。
+   */
+  const create = async (sessionID: string, raw: string): Promise<void> => {
+    const existing = await deps.repo.load(sessionID)
+    if (existing && isOpenStatus(existing.status))
+      return port.notify(
+        sessionID,
+        format(deps.messages["notice.goalExists"], { status: statusLabel(deps.messages, existing.status) }),
+      )
+    const check = normalizeObjective(raw, deps.options.maxObjectiveChars)
+    if (!check.ok) return port.notify(sessionID, deps.messages["notice.createUsage"])
+    const goal = createGoal({
+      goalId: deps.newGoalId(),
+      objective: check.objective,
+      now: deps.now(),
+      tokenBudget: deps.options.tokenBudget,
+      maxTokenBudget: deps.options.maxGoalTokenBudget,
+    })
+    await deps.repo.save(sessionID, goal)
+    // 起一轮：模型收到一行续跑触发；目标本体与规则由 goalContext 钩子注入 system，不在这里重复。
+    // 转录里显示的是给人看的一行——完整目标（不裁剪）。
+    await port.deliver({
+      sessionID,
+      text: continuationTrigger(),
+      description: noticeLine(deps.messages["label.goalRequest"], goal.objective, Number.POSITIVE_INFINITY),
+    })
+    return port.notify(sessionID, deps.messages["notice.created"])
   }
 
   const pause = async (sessionID: string): Promise<void> => {
@@ -213,11 +244,7 @@ export function createCommandHandlers(deps: GoalDeps, port: CommandPort): GoalCo
     goal: async (input) => {
       const parsed = parseGoalCommand(input.prompt.text)
       if (parsed.kind === "status") return status(input.sessionID)
-      await port.deliver({
-        sessionID: input.sessionID,
-        text: goalCommandPrompt(parsed.objective ?? ""),
-        description: noticeLine(deps.messages["label.goalRequest"], parsed.objective ?? "", Number.POSITIVE_INFINITY),
-      })
+      return create(input.sessionID, parsed.objective ?? "")
     },
     status,
     pause,

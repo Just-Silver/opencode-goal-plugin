@@ -42,19 +42,29 @@ function makeDeps(overrides: Partial<GoalDeps> = {}): GoalDeps {
 const ctx = { sessionID: "ses_1", agent: "build" }
 const parse = (result: { content: string }) => JSON.parse(result.content)
 
+/** 直接落一条目标（创建归用户命令，工具不再有 create）。 */
+function seed(deps: GoalDeps, goal = createGoal({ goalId: "g1", objective: "x", now: 0 })) {
+  return deps.repo.save("ses_1", goal)
+}
+
 describe("createGoalTool", () => {
-  test("create stores an active goal", async () => {
+  test("only get / complete / rewrite / block are model-callable", async () => {
     const tool = createGoalTool(makeDeps())
-    const result = parse(await tool.execute({ op: "create", objective: "finish X" }, ctx))
-    expect(result.goal.status).toBe("active")
-    expect(result.goal.objective).toBe("finish X")
+    for (const op of ["create", "resume", "drop", "budget"])
+      await expect(tool.execute({ op }, ctx)).rejects.toThrow(/op must be one of/)
   })
 
-  test("create with token_budget 0 means no budget (ignores the config default)", async () => {
-    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, tokenBudget: 999 } })
+  test("get returns null when no goal exists", async () => {
+    const tool = createGoalTool(makeDeps())
+    expect(parse(await tool.execute({ op: "get" }, ctx)).goal).toBeNull()
+  })
+
+  test("get reports an existing goal", async () => {
+    const deps = makeDeps()
+    await seed(deps, createGoal({ goalId: "g1", objective: "finish X", now: 0 }))
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "create", objective: "x", token_budget: 0 }, ctx))
-    expect(result.goal.tokenBudget).toBeNull()
+    const result = parse(await tool.execute({ op: "get" }, ctx))
+    expect(result.goal.objective).toBe("finish X")
   })
 
   test("overlays the in-flight turn usage on tool results", async () => {
@@ -65,146 +75,60 @@ describe("createGoalTool", () => {
         elapsedSeconds: 3,
       }),
     })
+    await seed(deps)
     const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "finish X" }, ctx)
     const result = parse(await tool.execute({ op: "get" }, ctx))
     expect(result.goal.tokensUsed).toBe(167)
     expect(result.goal.timeUsedSeconds).toBe(3)
     expect(result.completionBudgetReport).toContain("tokens used 167")
   })
 
-  test("create rejects an empty objective", async () => {
-    const tool = createGoalTool(makeDeps())
-    await expect(tool.execute({ op: "create", objective: "  " }, ctx)).rejects.toThrow(/objective/)
-  })
-
-  test("create fails while an open goal exists", async () => {
+  test("complete marks an active goal complete and then refuses again", async () => {
     const deps = makeDeps()
+    await seed(deps)
     const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "first" }, ctx)
-    await expect(tool.execute({ op: "create", objective: "second" }, ctx)).rejects.toThrow(/already open/)
+    const done = parse(await tool.execute({ op: "complete" }, ctx))
+    expect(done.goal.status).toBe("complete")
+    await expect(tool.execute({ op: "complete" }, ctx)).rejects.toThrow(/cannot complete/)
   })
 
-  test("create is refused for a restricted agent before writing", async () => {
-    const deps = makeDeps({ isRestricted: () => true })
-    const tool = createGoalTool(deps)
-    await expect(tool.execute({ op: "create", objective: "x" }, ctx)).rejects.toThrow(/cannot create/)
-    expect(await deps.repo.load("ses_1")).toBeUndefined()
-  })
-
-  test("get returns null when no goal exists", async () => {
+  test("complete requires an existing goal", async () => {
     const tool = createGoalTool(makeDeps())
-    expect(parse(await tool.execute({ op: "get" }, ctx)).goal).toBeNull()
+    await expect(tool.execute({ op: "complete" }, ctx)).rejects.toThrow(/no goal/)
   })
 
-  test("resume is refused for a restricted agent", async () => {
-    const deps = makeDeps({ isRestricted: () => true })
-    await deps.repo.save("ses_1", {
-      ...createGoal({ goalId: "g1", objective: "x", now: 0 }),
-      status: "paused",
-    })
-    const tool = createGoalTool(deps)
-    await expect(tool.execute({ op: "resume" }, ctx)).rejects.toThrow(/cannot resume/)
-    expect((await deps.repo.load("ses_1"))?.status).toBe("paused")
-  })
-
-  test("drop removes the record", async () => {
-    const deps = makeDeps()
-    const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "x" }, ctx)
-    await tool.execute({ op: "drop" }, ctx)
-    expect(await deps.repo.load("ses_1")).toBeUndefined()
+  test("block requires an existing goal", async () => {
+    const tool = createGoalTool(makeDeps())
+    await expect(tool.execute({ op: "block", blocker_key: "k" }, ctx)).rejects.toThrow(/no goal/)
   })
 
   test("block counts to the threshold and returns the wrap-up instruction", async () => {
     const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 2 } })
+    await seed(deps)
     const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "x" }, ctx)
     await tool.execute({ op: "block", blocker_key: "no-key", blocker: "missing key" }, ctx)
     const second = parse(await tool.execute({ op: "block", blocker_key: "no-key", blocker: "missing key" }, ctx))
     expect(second.goal.status).toBe("blocked")
     expect(second.instruction).toContain("no-key")
   })
 
-  test("get reports an existing goal", async () => {
-    const tool = createGoalTool(makeDeps())
-    await tool.execute({ op: "create", objective: "finish X" }, ctx)
-    const result = parse(await tool.execute({ op: "get" }, ctx))
-    expect(result.goal.objective).toBe("finish X")
-  })
-
-  test("complete marks an active goal complete and then refuses again", async () => {
-    const tool = createGoalTool(makeDeps())
-    await tool.execute({ op: "create", objective: "x" }, ctx)
-    const done = parse(await tool.execute({ op: "complete" }, ctx))
-    expect(done.goal.status).toBe("complete")
-    await expect(tool.execute({ op: "complete" }, ctx)).rejects.toThrow(/cannot complete/)
-  })
-
-  test("resume reactivates a paused goal and re-applies the budget", async () => {
-    const deps = makeDeps()
-    await deps.repo.save("ses_1", {
-      ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }),
-      status: "paused",
-      tokensUsed: 5,
-    })
-    const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "resume" }, ctx))
-    expect(result.goal.status).toBe("budget-limited")
-  })
-
-  test("create defaults the budget to options.tokenBudget", async () => {
-    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, tokenBudget: 42 } })
-    const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "create", objective: "x" }, ctx))
-    expect(result.goal.tokenBudget).toBe(42)
-    expect(result.remainingTokens).toBe(42)
-  })
-
-  test("create rejects a token_budget above maxGoalTokenBudget", async () => {
-    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, maxGoalTokenBudget: 50 } })
-    const tool = createGoalTool(deps)
-    await expect(tool.execute({ op: "create", objective: "x", token_budget: 100 }, ctx)).rejects.toThrow(/exceeds max/)
-  })
-
-  test("complete, resume, drop and block require an existing goal", async () => {
-    const tool = createGoalTool(makeDeps())
-    await expect(tool.execute({ op: "complete" }, ctx)).rejects.toThrow(/no goal/)
-    await expect(tool.execute({ op: "resume" }, ctx)).rejects.toThrow(/no goal/)
-    await expect(tool.execute({ op: "drop" }, ctx)).rejects.toThrow(/no goal/)
-    await expect(tool.execute({ op: "block", blocker_key: "k" }, ctx)).rejects.toThrow(/no goal/)
-  })
-
   test("block reaching the budget limit returns the budget instruction", async () => {
     const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 3, tokenBudget: 5 } })
-    await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }), tokensUsed: 5 })
+    await seed(deps, { ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }), tokensUsed: 5 })
     const tool = createGoalTool(deps)
     const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
     expect(result.goal.status).toBe("budget-limited")
     expect(result.instruction).toContain("token budget")
   })
 
-  test("block on an over-budget goal keeps it budget-limited (budget outranks blocked)", async () => {
-    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 1, tokenBudget: 5 } })
-    await deps.repo.save("ses_1", {
-      ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }),
-      status: "budget-limited",
-      tokensUsed: 5,
-    })
-    const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
-    expect(result.goal.status).toBe("budget-limited")
-    expect(result.instruction).toContain("token budget")
-    expect(result.instruction).not.toContain("blocked")
-  })
-
-  test("block that both reaches the threshold and exceeds budget yields budget-limited", async () => {
-    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 1, tokenBudget: 5 } })
-    await deps.repo.save("ses_1", { ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }), tokensUsed: 5 })
-    const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
-    expect(result.goal.status).toBe("budget-limited")
-    expect(result.instruction).toContain("token budget")
+  test("refuses a blocker report on a non-active goal instead of silently doing nothing", async () => {
+    for (const status of ["paused", "blocked", "budget-limited", "usage-limited", "complete"] as const) {
+      const deps = makeDeps()
+      await seed(deps, { ...createGoal({ goalId: "g1", objective: "x", now: 0 }), status })
+      const tool = createGoalTool(deps)
+      await expect(tool.execute({ op: "block", blocker_key: "k" }, ctx)).rejects.toThrow(/cannot report a blocker/)
+      expect((await deps.repo.load("ses_1"))?.status).toBe(status)
+    }
   })
 
   test("invalid input is rejected before touching storage", async () => {
@@ -222,60 +146,78 @@ describe("createGoalTool", () => {
   })
 })
 
-describe("budget op", () => {
-  test("sets a budget on an existing goal", async () => {
-    const deps = makeDeps()
-    const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "x" }, ctx)
-    const result = parse(await tool.execute({ op: "budget", token_budget: 500 }, ctx))
-    expect(result.goal.tokenBudget).toBe(500)
-    expect((await deps.repo.load("ses_1"))?.tokenBudget).toBe(500)
-  })
-
-  test("token_budget 0 clears the budget", async () => {
-    const deps = makeDeps()
-    const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "x", token_budget: 100 }, ctx)
-    const result = parse(await tool.execute({ op: "budget", token_budget: 0 }, ctx))
-    expect(result.goal.tokenBudget).toBeNull()
-    const stored = await deps.repo.load("ses_1")
-    expect(stored && "tokenBudget" in stored).toBe(false)
-  })
-
-  test("requires token_budget explicitly", async () => {
-    const deps = makeDeps()
-    const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "x" }, ctx)
-    await expect(tool.execute({ op: "budget" }, ctx)).rejects.toThrow(/token_budget/)
-  })
-
-  test("errors without a goal and for a restricted agent", async () => {
-    const tool = createGoalTool(makeDeps())
-    await expect(tool.execute({ op: "budget", token_budget: 10 }, ctx)).rejects.toThrow(/no goal/)
-
-    const restricted = createGoalTool(makeDeps({ isRestricted: (agent) => agent === "plan" }))
-    await restricted.execute({ op: "create", objective: "x" }, ctx)
-    await expect(
-      restricted.execute({ op: "budget", token_budget: 10 }, { sessionID: "ses_1", agent: "plan" }),
-    ).rejects.toThrow(/budget/)
-  })
-
-  test("rejects a budget above maxGoalTokenBudget", async () => {
-    const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, maxGoalTokenBudget: 100 } })
-    const tool = createGoalTool(deps)
-    await tool.execute({ op: "create", objective: "x" }, ctx)
-    await expect(tool.execute({ op: "budget", token_budget: 101 }, ctx)).rejects.toThrow(/max_goal_token_budget/)
-  })
-
-  test("lowering below the used tokens returns the budget-limit instruction", async () => {
+describe("rewrite op", () => {
+  test("rewrites only the objective and preserves status, budget and accounting", async () => {
     const deps = makeDeps()
     await deps.repo.save("ses_1", {
-      ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 100 }),
-      tokensUsed: 100,
+      ...createGoal({ goalId: "g1", objective: "old", now: 0, tokenBudget: 500 }),
+      status: "paused" as const,
+      tokensUsed: 42,
+      usage: { input: 10, output: 20, reasoning: 0, cacheRead: 12, cacheWrite: 0 },
+      timeUsedSeconds: 7,
+      continuations: 3,
     })
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "budget", token_budget: 50 }, ctx))
-    expect(result.goal.status).toBe("budget-limited")
-    expect(result.instruction).toContain("token budget")
+    const result = parse(await tool.execute({ op: "rewrite", objective: "  new objective  " }, ctx))
+    expect(result.goal.objective).toBe("new objective")
+    expect(result.goal.status).toBe("paused")
+    expect(result.goal.tokenBudget).toBe(500)
+    expect(result.goal.tokensUsed).toBe(42)
+    const stored = await deps.repo.load("ses_1")
+    expect(stored?.objective).toBe("new objective")
+    expect(stored?.status).toBe("paused")
+    expect(stored?.tokenBudget).toBe(500)
+    expect(stored?.tokensUsed).toBe(42)
+    expect(stored?.usage).toEqual({ input: 10, output: 20, reasoning: 0, cacheRead: 12, cacheWrite: 0 })
+    expect(stored?.timeUsedSeconds).toBe(7)
+    expect(stored?.continuations).toBe(3)
+    expect(stored?.createdAt).toBe(0)
+    expect(stored?.updatedAt).toBe(1000)
+  })
+
+  test("requires an existing goal", async () => {
+    const tool = createGoalTool(makeDeps())
+    await expect(tool.execute({ op: "rewrite", objective: "x" }, ctx)).rejects.toThrow(/no goal/)
+  })
+
+  test("rejects an empty objective", async () => {
+    const deps = makeDeps()
+    await seed(deps)
+    const tool = createGoalTool(deps)
+    await expect(tool.execute({ op: "rewrite", objective: "   " }, ctx)).rejects.toThrow(/objective/)
+  })
+
+  test("refuses a completed goal and leaves it untouched", async () => {
+    const deps = makeDeps()
+    await seed(deps, { ...createGoal({ goalId: "g1", objective: "old", now: 0 }), status: "complete" as const })
+    const tool = createGoalTool(deps)
+    await expect(tool.execute({ op: "rewrite", objective: "new" }, ctx)).rejects.toThrow(/complete/)
+    expect((await deps.repo.load("ses_1"))?.objective).toBe("old")
+  })
+
+  test("on a non-active goal it returns an instruction that the goal will not continue", async () => {
+    const deps = makeDeps()
+    await seed(deps, { ...createGoal({ goalId: "g1", objective: "old", now: 0 }), status: "paused" as const })
+    const tool = createGoalTool(deps)
+    const result = parse(await tool.execute({ op: "rewrite", objective: "new" }, ctx))
+    expect(result.goal.objective).toBe("new")
+    expect(result.goal.status).toBe("paused")
+    expect(result.instruction).toContain("/goal-resume")
+  })
+
+  test("on an active goal it returns no instruction", async () => {
+    const deps = makeDeps()
+    await seed(deps)
+    const tool = createGoalTool(deps)
+    const result = parse(await tool.execute({ op: "rewrite", objective: "new" }, ctx))
+    expect(result.instruction).toBeUndefined()
+  })
+
+  test("is refused for a restricted agent and writes nothing", async () => {
+    const deps = makeDeps({ isRestricted: () => true })
+    await seed(deps, createGoal({ goalId: "g1", objective: "old", now: 0 }))
+    const tool = createGoalTool(deps)
+    await expect(tool.execute({ op: "rewrite", objective: "new" }, ctx)).rejects.toThrow(/cannot rewrite/)
+    expect((await deps.repo.load("ses_1"))?.objective).toBe("old")
   })
 })

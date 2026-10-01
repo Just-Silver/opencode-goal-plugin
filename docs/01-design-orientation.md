@@ -5,6 +5,8 @@
 > **原则：OMP 与 Codex 一致处直接照抄；仅在其分歧或 OpenCode 约束处才讨论。**
 > 更新：2026-09-24。
 >
+> **2026-10-01 改定（创建/改写归用户）**：`/goal <text>` 改为**用户直写**（逐字入库 + 起一轮，不经模型），模型工具删去 `create`/`resume`/`drop`/`budget`、新增 `rewrite`（仅用户明确要求时）。见 §2 / §3。
+>
 > **实现状态（2026-09-25，v0.2.0）**：本文是 v1 取向快照。§7「阶段二」各项已陆续交付——`usage-limited` + 宿主终态错误 → `blocked`（V2 子项目 3，`2026-09-25-opencode-goal-v2-host-signals-design.md`）、子会话/后台 deferral（V2 子项目 2，`2026-09-25-opencode-goal-v2-background-deferral-design.md`）、i18n（`2026-09-25-opencode-goal-v2-i18n-design.md`）。**仍待做**：TUI 侧边栏（V2 子项目 5）。正文未逐条改写，以本说明与各 spec 为准。
 
 ## 0. 定位
@@ -27,11 +29,13 @@
 
 | 命令 | 作用 |
 | --- | --- |
-| `/goal <text>` | 模型先判断输入信息是否足够（可判定成功标准 / 验证方法 / 范围边界 / 停止条件）：够 → 自动结构化后直接 `create`；不够 → 先访谈（一次一问、≤6 问），问全再 `create` |
-| `/goal-status` / `-pause` / `-resume` / `-clear` | 生命周期控制（**服务端确定性处理**，不经模型）；名字跟随 `command_name` |
+| `/goal <text>` | **用户直写创建**：目标逐字入库 + 起一轮，**不经模型**（不追问、不规范化、不判断可不可执行）；已有未完成目标时不覆盖 |
+| `/goal-rebuild <text>` | 改写目标正文（保留状态 / 预算 / 记账） |
+| `/goal-status` / `-pause` / `-resume` / `-clear` / `-budget` | 生命周期与预算控制（**服务端确定性处理**，不经模型）；名字跟随 `command_name` |
 
-- 对齐 superpowers 的 brainstorm-before-build：**先把目标逼到可验证，再让它自主跑**；由模型按输入质量**自适应**决定是否追问。
-- 命令是"薄壳"：把用户输入包装成受控 prompt，让模型调用单一 `goal` 工具（或直接由服务端处理 pause/resume/clear）。
+- **创建与改写目标归用户**（对齐 Codex）：模型不得自行创建或改写目标。
+  > 2026-10-01 改定：原取向让 `/goal` 把输入包装成 prompt 交给模型自适应访谈 + `create`，实测模型会曲解用户意图、造出不符合原意的目标。现改为用户直写、逐字入库。
+- 命令是"薄壳"：状态/预算控制由服务端确定性处理；`/goal` 直写后只向模型投递**一行续跑触发**，目标本体与规则由 `goalContext` 注入 system（不重复）。
 
 ## 3. 模型工具面 **[定]**
 
@@ -39,18 +43,16 @@
 
 ```ts
 goal({
-  op: "create" | "get" | "complete" | "resume" | "drop" | "block",
-  objective?: string,
-  token_budget?: integer,
+  op: "get" | "complete" | "rewrite" | "block",
+  objective?: string,     // op=rewrite：替换目标正文
   blocker_key?: string,   // op=block：稳定 slug，服务端据此计数
   blocker?: string        // op=block：阻塞描述（展示用）
 })
 ```
 
-- 模型可 `complete` / `resume` / `block`（block 仅"报告"，是否 blocked 由服务端裁决）。
-- **`pause` / `clear` 不暴露为 op**（用户命令处理）。
+- 模型可 `complete` / `block`（block 仅"报告"，是否 blocked 由服务端裁决）；`rewrite` **仅当用户明确要求改目标时**才调用。
+- **`create` / `resume` / `drop` / `budget` 不暴露为 op**（归用户命令；对齐 Codex——OMP 模型可 resume/drop，此处取更严一侧）。
 - 返回：`{ goal, remainingTokens, completionBudgetReport, blockerStreak? }`。
-- `create` 仅在**显式请求**（命令或用户明说）时；已有未完成目标时失败并提示。
 
 ## 4. 状态机 **[定]**
 

@@ -203,18 +203,24 @@ describe("server", () => {
     if (typeof cleanup === "function") await cleanup()
   })
 
-  test("an objective is delivered as a resuming synthetic so the prompt never floods the transcript", async () => {
+  test("a goal is created directly and started with a one-line resuming synthetic", async () => {
     const env = mockCtx(missing)
     const cleanup = await plugin.setup(env.ctx as never)
     const command = env.commands[0]
 
     await command!.execute({ sessionID: "ses_1", prompt: { text: "ship it" } })
 
+    // 直写：目标逐字入库，模型不参与创建。
+    const goal = env.store.get("goal:ses_1") as { objective?: string; status?: string } | undefined
+    expect(goal?.objective).toBe("ship it")
+    expect(goal?.status).toBe("active")
+
     expect(env.synthetic).toHaveLength(1)
     const notice = env.synthetic[0] as { text?: string; description?: string; resume?: boolean }
     expect(notice.resume).toBe(true)
-    expect(notice.text).toContain("ship it")
-    // 完整 prompt 只给模型（text）；TUI 只显示 description 一行。
+    // 起跑轮只发一行续跑触发；目标本体与规则由 goalContext 注入 system，不重复。
+    expect(notice.text).toBe("Continue the active goal from its current state.")
+    // TUI 只显示 description 一行——完整目标。
     expect(notice.description).toBe("Goal request · ship it")
 
     if (typeof cleanup === "function") await cleanup()
@@ -235,7 +241,7 @@ describe("server", () => {
     const prompt = env.prompts[0] as { text?: string; resume?: boolean; sessionID?: string }
     expect(prompt.resume).toBe(true)
     expect(prompt.sessionID).toBe("ses_1")
-    expect(prompt.text).toContain("ship it")
+    expect(prompt.text).toBe("Continue the active goal from its current state.")
     // 提交回退有破坏性副作用（丢弃回退点之后的消息、还原文件），必须明确告知用户。
     expect(env.notices.map((item) => item.name)).toContain("notice")
     expect(String(env.notices[0]?.data.message)).toContain("revert")

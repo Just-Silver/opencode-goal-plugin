@@ -16,6 +16,9 @@ export interface Messages {
   readonly "notice.paused": string
   readonly "notice.resumed": string
   readonly "notice.cleared": string
+  readonly "notice.created": string
+  readonly "notice.goalExists": string
+  readonly "notice.createUsage": string
   readonly "notice.nothingToPause": string
   readonly "notice.nothingToResume": string
   readonly "notice.resumeBudgetLow": string
@@ -84,7 +87,6 @@ export interface Messages {
   readonly "tool.goal.description": string
   readonly "tool.goal.op": string
   readonly "tool.goal.objective": string
-  readonly "tool.goal.tokenBudget": string
   readonly "tool.goal.blockerKey": string
   readonly "tool.goal.blocker": string
   readonly "tool.debug.description": string

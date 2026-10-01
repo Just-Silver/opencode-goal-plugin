@@ -7,33 +7,35 @@ describe("parseToolArgs", () => {
     expect(parseToolArgs({ op: "explode" })).toEqual({ ok: false, message: expect.stringContaining("op") })
   })
 
-  test("maps snake_case keys and accepts a create call", () => {
-    expect(parseToolArgs({ op: "create", objective: "do it", token_budget: 500 })).toEqual({
+  test("rejects the ops that are no longer model-callable", () => {
+    // 创建 / 恢复 / 删除 / 改预算归用户命令，模型工具不再接受。
+    for (const op of ["create", "resume", "drop", "budget"])
+      expect(parseToolArgs({ op })).toEqual({ ok: false, message: expect.stringContaining("op") })
+  })
+
+  test("accepts a rewrite call", () => {
+    expect(parseToolArgs({ op: "rewrite", objective: "new goal" })).toEqual({
       ok: true,
-      args: { op: "create", objective: "do it", tokenBudget: 500 },
+      args: { op: "rewrite", objective: "new goal" },
     })
   })
 
-  test("accepts token_budget 0 (means no budget) but rejects negatives and fractions", () => {
-    expect(parseToolArgs({ op: "create", token_budget: 0 })).toEqual({ ok: true, args: { op: "create", tokenBudget: 0 } })
-    for (const token_budget of [-1, 1.5])
-      expect(parseToolArgs({ op: "create", token_budget })).toEqual({
-        ok: false,
-        message: expect.stringContaining("token_budget"),
-      })
-  })
-
-  test("accepts the budget op", () => {
-    expect(parseToolArgs({ op: "budget", token_budget: 500 })).toEqual({
-      ok: true,
-      args: { op: "budget", tokenBudget: 500 },
-    })
+  test("accepts get and complete", () => {
+    expect(parseToolArgs({ op: "get" })).toEqual({ ok: true, args: { op: "get" } })
+    expect(parseToolArgs({ op: "complete" })).toEqual({ ok: true, args: { op: "complete" } })
   })
 
   test("accepts a block call", () => {
     expect(parseToolArgs({ op: "block", blocker_key: "no-key", blocker: "missing credentials" })).toEqual({
       ok: true,
       args: { op: "block", blockerKey: "no-key", blocker: "missing credentials" },
+    })
+  })
+
+  test("ignores a token_budget field (no longer a tool parameter)", () => {
+    expect(parseToolArgs({ op: "rewrite", objective: "x", token_budget: 500 })).toEqual({
+      ok: true,
+      args: { op: "rewrite", objective: "x" },
     })
   })
 

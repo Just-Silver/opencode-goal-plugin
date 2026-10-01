@@ -1,13 +1,13 @@
 import type { Messages } from "../i18n/messages"
 import { applyBlocker } from "../model/blocked"
-import { GoalError, complete, createGoal, resume } from "../model/goal"
-import { applyBudget, setBudget } from "../model/limits"
+import { complete, rebuild } from "../model/goal"
+import { applyBudget } from "../model/limits"
 import { normalizeObjective } from "../model/objective"
 import { parseToolArgs } from "../model/tool-args"
 import { buildToolResult } from "../model/tool-result"
-import { isOpenStatus, type Goal } from "../model/types"
+import type { Goal } from "../model/types"
 import { withPending } from "../model/usage"
-import { blockedWrapUp, budgetLimitPrompt } from "../prompts/index"
+import { blockedWrapUp, budgetLimitPrompt, rewriteStoppedNote } from "../prompts/index"
 import type { GoalDeps } from "./deps"
 
 export const GOAL_TOOL_NAME = "goal"
@@ -19,11 +19,10 @@ export function goalToolInput(messages: Messages): any {
     properties: {
       op: {
         type: "string",
-        enum: ["create", "get", "complete", "resume", "drop", "block", "budget"],
+        enum: ["get", "complete", "rewrite", "block"],
         description: messages["tool.goal.op"],
       },
       objective: { type: "string", description: messages["tool.goal.objective"] },
-      token_budget: { type: "integer", minimum: 0, description: messages["tool.goal.tokenBudget"] },
       blocker_key: { type: "string", description: messages["tool.goal.blockerKey"] },
       blocker: { type: "string", description: messages["tool.goal.blocker"] },
     },
@@ -64,23 +63,6 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
       const view = (goal: Goal) => buildToolResult(withPending(goal, deps.pendingUsage?.(sessionID)))
 
       switch (args.op) {
-        case "create": {
-          if (deps.isRestricted(context.agent)) throw new Error("goal: this agent cannot create a goal")
-          if (existing && isOpenStatus(existing.status))
-            throw new Error(`goal: a goal is already open (${existing.status}); complete or drop it first`)
-          const check = normalizeObjective(args.objective ?? "", deps.options.maxObjectiveChars)
-          if (!check.ok) throw new Error("goal: objective must be a non-empty string")
-          const goal = createGoal({
-            goalId: deps.newGoalId(),
-            objective: check.objective,
-            now,
-            tokenBudget: args.tokenBudget === 0 ? undefined : (args.tokenBudget ?? deps.options.tokenBudget),
-            maxTokenBudget: deps.options.maxGoalTokenBudget,
-          })
-          await deps.repo.save(sessionID, goal)
-          return asContent(view(goal))
-        }
-
         case "get": {
           return asContent(existing ? view(existing) : { goal: null })
         }
@@ -93,49 +75,25 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           return asContent(view(goal))
         }
 
-        case "resume": {
-          if (!existing) throw new Error("goal: no goal to resume")
-          if (deps.isRestricted(context.agent)) throw new Error("goal: this agent cannot resume a goal")
-          const resumed = resume(existing, now)
-          const goal = applyBudget(resumed, now)
-          await deps.repo.save(sessionID, goal)
-          return asContent(view(goal))
-        }
-
-        case "drop": {
-          if (!existing) throw new Error("goal: no goal to drop")
-          await deps.repo.remove(sessionID)
-          return asContent({ goal: null, dropped: true })
-        }
-
-        case "budget": {
-          if (deps.isRestricted(context.agent)) throw new Error("goal: this agent cannot change the budget")
-          if (!existing) throw new Error("goal: no goal to change the budget of")
-          if (args.tokenBudget === undefined)
-            throw new Error("goal: token_budget is required for op budget (0 = no budget)")
-          let goal: Goal
-          try {
-            goal = setBudget(existing, {
-              budget: args.tokenBudget === 0 ? undefined : args.tokenBudget,
-              maxTokenBudget: deps.options.maxGoalTokenBudget,
-              now,
-            })
-          } catch (error) {
-            if (error instanceof GoalError) throw new Error(`goal: ${error.message}`)
-            throw error
-          }
+        case "rewrite": {
+          if (deps.isRestricted(context.agent)) throw new Error("goal: this agent cannot rewrite the objective")
+          if (!existing) throw new Error("goal: no goal to rewrite")
+          if (existing.status === "complete") throw new Error("goal: cannot rewrite a completed goal")
+          const check = normalizeObjective(args.objective ?? "", deps.options.maxObjectiveChars)
+          if (!check.ok) throw new Error('goal: rewrite requires a non-empty "objective"')
+          const goal = rebuild(existing, check.objective, now)
           await deps.repo.save(sessionID, goal)
           const result = view(goal)
-          if (goal.status === "budget-limited")
-            return asContent({
-              ...result,
-              instruction: budgetLimitPrompt(goal, { maxObjectiveChars: deps.options.maxObjectiveChars }),
-            })
+          // 改写只换正文、不恢复执行：非 active 时明确告诉模型目标不会自动续跑，别以为「改完就跑了」。
+          if (goal.status !== "active") return asContent({ ...result, instruction: rewriteStoppedNote(goal.status) })
           return asContent(result)
         }
 
         case "block": {
           if (!existing) throw new Error("goal: no goal to block")
+          // 只有 active 才计数；非 active 时静默成功会让模型误以为「阻碍已上报」。与 complete 一样明确拒绝。
+          if (existing.status !== "active")
+            throw new Error(`goal: cannot report a blocker for a ${existing.status} goal`)
           const { goal: reported, blocked } = applyBlocker(
             existing,
             { key: args.blockerKey ?? "unknown", text: args.blocker ?? "" },

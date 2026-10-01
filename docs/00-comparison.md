@@ -53,7 +53,8 @@
 
 - **范围**：OpenCode **server 侧插件**（命令 + 工具 + 续跑 + 持久化）；TUI 侧边栏可作为后续可选项。
 - **安装方式**：**配置安装**（`opencode.json(c)` 的 `plugins`）。server 侧插件不受"双 Solid"限制，可直接配置安装 → 详见 `docs/opencode/config-install.md`。
-- **工具面**：倾向 **OMP 式单工具 + `op`**（`create|get|complete|resume|drop`），或保留 `get/create/update` 三工具，二者择一并固定。
+- **工具面**：倾向 **OMP 式单工具 + `op`**，或保留 `get/create/update` 三工具，二者择一并固定。
+  > **2026-10-01 定稿**：单工具 `goal`，op = `get` / `complete` / `rewrite` / `block`；`create`/`resume`/`drop`/`budget` 归用户命令。见 `01-design-orientation.md` §3。
 - **状态机**：`active | paused | blocked | budget-limited | complete | clear`；模型只能 `complete/blocked/paused`，其余归用户/系统。
 - **持久化**：JSON 文件 + 原子写（复用 prevalentWare 的崩溃一致性经验，但独立实现）；按 session 键控；超长目标整段省略。
 - **续跑**：idle 触发；deferral（子会话/工具在跑时不续）；中断 → 暂停；会话恢复默认不自动续。

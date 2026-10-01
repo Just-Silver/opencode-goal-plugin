@@ -95,21 +95,51 @@ function makeHandler() {
 }
 
 describe("createCommandHandlers", () => {
-  test("goal forwards the objective to the model", async () => {
-    const { handlers, prompts, descriptions } = makeHandler()
+  test("goal creates the objective directly, without prompting the model to normalize it", async () => {
+    const { deps, handlers, prompts, descriptions, notices } = makeHandler()
     await handlers.goal({ sessionID: "ses_1", prompt: { text: "ship it" } })
-    expect(prompts).toHaveLength(1)
-    expect(prompts[0]).toContain("ship it")
-    // TUI 只显示 description 一行；整段 prompt 不该进转录。
+    const goal = await deps.repo.load("ses_1")
+    expect(goal?.objective).toBe("ship it")
+    expect(goal?.status).toBe("active")
+    // 起一轮：模型收到的是一行续跑触发（目标本体与规则由 goalContext 注入 system），
+    // 不再是「请你规范化并创建目标」的提示词。
+    expect(prompts).toEqual(["Continue the active goal from its current state."])
+    // TUI 只显示 description 一行；不裁剪（TUI 自动换行）。
     expect(descriptions[0]).toBe("Goal request · ship it")
+    expect(notices.at(-1)).toContain("created")
   })
 
-  test("the goal request notice shows the full objective (no clipping)", async () => {
-    const { handlers, descriptions } = makeHandler()
+  test("the goal request line shows the full objective (no clipping)", async () => {
+    const { deps, handlers, descriptions } = makeHandler()
     const objective = "从当前空文件夹开始，创建一个完整、可运行的 C# .NET 10 CLI 待办事项项目。这个任务必须经历多个阶段，不能在完成第一版代码后直接结束。"
     await handlers.goal({ sessionID: "ses_1", prompt: { text: objective } })
+    expect((await deps.repo.load("ses_1"))?.objective).toBe(objective)
     expect(descriptions[0]).toBe(`Goal request · ${objective}`)
     expect(descriptions[0]).not.toContain("…")
+  })
+
+  test("goal refuses to overwrite an open goal and points at /goal-rebuild", async () => {
+    const { deps, handlers, prompts, notices } = makeHandler()
+    await deps.repo.save("ses_1", createGoal({ goalId: "g1", objective: "old", now: 0 }))
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: "new" } })
+    expect((await deps.repo.load("ses_1"))?.objective).toBe("old")
+    expect(prompts).toHaveLength(0)
+    expect(notices.at(-1)).toContain("/goal-rebuild")
+  })
+
+  test("goal replaces a completed goal", async () => {
+    const { deps, handlers, prompts } = makeHandler()
+    await deps.repo.save("ses_1", complete(createGoal({ goalId: "g1", objective: "old", now: 0 }), 1))
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: "new" } })
+    expect((await deps.repo.load("ses_1"))?.objective).toBe("new")
+    expect(prompts).toEqual(["Continue the active goal from its current state."])
+  })
+
+  test("goal applies the configured default token budget", async () => {
+    const deps = { ...makeDeps(), options: { ...DEFAULT_OPTIONS, tokenBudget: 42 } }
+    const { handlers } = runner(deps)
+    await handlers.goal({ sessionID: "ses_1", prompt: { text: "x" } })
+    expect((await deps.repo.load("ses_1"))?.tokenBudget).toBe(42)
   })
 
   test("an empty goal argument reports the status instead of prompting the model", async () => {

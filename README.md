@@ -37,7 +37,7 @@
 
 | 命令 | 作用 |
 | --- | --- |
-| `/goal <目标>` | 设定目标；信息不够时它会先追问几个问题，够了再自动开始 |
+| `/goal <目标>` | **直接设定目标**：逐字保存 + 起一轮，不询问、不转发给模型；已有未完成目标时不覆盖 |
 | `/goal`（或 `/goal-status`） | 查看当前目标与进度 |
 | `/goal-pause` | 暂停 |
 | `/goal-resume` | 恢复并**立刻激活**（仅在会话空闲、且预算还够时；预算已用尽会**拒绝**并提示改用 `/goal-budget` 提高预算） |
@@ -65,7 +65,7 @@
 | `blocked_threshold` | 3 | 连续阻塞多少轮算「卡住」 |
 | `empty_threshold` | 3 | 连续空转多少轮算「空转」 |
 | `reconcile_guard_minutes` | 5 | 启动兜底保护窗（分钟） |
-| `restricted_agents` | `["plan"]` | 受限 agent（拒创建 / 续跑 / resume） |
+| `restricted_agents` | `["plan"]` | 受限 agent（拒改写目标 / 续跑） |
 | `disabled_tools` | `["question"]` | goal `active` 期间从模型工具表移除的工具名；设 `[]` 关闭 |
 | `command_name` | `goal` | 主命令名；状态控制是派生命令 `<name>-status` / `-pause` / `-resume` / `-clear` |
 | `debug_command_name` | `goal-debug` | 调试命令名 |

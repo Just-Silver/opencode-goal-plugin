@@ -1,11 +1,10 @@
-export type ToolOp = "create" | "get" | "complete" | "resume" | "drop" | "block" | "budget"
+export type ToolOp = "get" | "complete" | "rewrite" | "block"
 
-const OPS: readonly ToolOp[] = ["create", "get", "complete", "resume", "drop", "block", "budget"]
+const OPS: readonly ToolOp[] = ["get", "complete", "rewrite", "block"]
 
 export interface ToolArgs {
   readonly op: ToolOp
   readonly objective?: string
-  readonly tokenBudget?: number
   readonly blockerKey?: string
   readonly blocker?: string
 }
@@ -20,18 +19,11 @@ export function parseToolArgs(raw: unknown): ToolArgsResult {
   const op = record.op
   if (typeof op !== "string" || !OPS.includes(op as ToolOp))
     return { ok: false, message: `goal: op must be one of ${OPS.join(", ")}` }
-  let tokenBudget: number | undefined
-  if (record.token_budget !== undefined) {
-    if (typeof record.token_budget !== "number" || !Number.isInteger(record.token_budget) || record.token_budget < 0)
-      return { ok: false, message: "goal: token_budget must be a non-negative integer (0 = no budget)" }
-    tokenBudget = record.token_budget
-  }
   return {
     ok: true,
     args: {
       op: op as ToolOp,
       ...(typeof record.objective === "string" ? { objective: record.objective } : {}),
-      ...(tokenBudget === undefined ? {} : { tokenBudget }),
       ...(typeof record.blocker_key === "string" ? { blockerKey: record.blocker_key } : {}),
       ...(typeof record.blocker === "string" ? { blocker: record.blocker } : {}),
     },

@@ -16,6 +16,9 @@ const zhCN = {
   "notice.paused": "目标已暂停。",
   "notice.resumed": "目标已恢复。",
   "notice.cleared": "目标已清除。",
+  "notice.created": "目标已创建。",
+  "notice.goalExists": "已存在目标（{status}）：可用 /goal-rebuild 修改目标正文，或先 /goal-clear 清除。",
+  "notice.createUsage": "用法：提供一个非空的目标。",
   "notice.nothingToPause": "目标当前为「{status}」，无需暂停。",
   "notice.nothingToResume": "目标当前为「{status}」，无需恢复。",
   "notice.resumeBudgetLow": "预算已用尽（已用 {used} / 预算 {budget}），未恢复目标。请先用 /goal-budget 提高预算（或 /goal-budget none 取消预算），再恢复。",
@@ -82,10 +85,9 @@ const zhCN = {
   "debug.yes": "是",
   "debug.no": "否",
   "tool.goal.description":
-    '管理本会话的持久目标。op "create" 仅在用户明确要求时启动目标；"get" 报告目标；"complete" 在证据充分时声明完成；另有 "resume"/"drop"；"block" 上报反复出现的阻碍；"budget" 修改 token 预算（仅在用户明确要求时）。',
-  "tool.goal.op": "操作：create | get | complete | resume | drop | block | budget。",
-  "tool.goal.objective": '目标正文（op "create" 时使用）。',
-  "tool.goal.tokenBudget": 'token 预算（op "create"/"budget" 时使用；正整数，0 表示无预算）。',
+    '管理本会话的持久目标。op "get" 报告目标；"complete" 在证据充分时声明完成；"rewrite" 替换目标正文并保留状态、预算与记账——仅当用户明确要求改目标时才调用；"block" 上报反复出现的阻碍。目标的创建与正文修改归用户；你不能创建、恢复、删除目标或修改预算。',
+  "tool.goal.op": "操作：get | complete | rewrite | block（\"rewrite\" 还需填 objective）。",
+  "tool.goal.objective": 'op "rewrite" 时必填：新的目标正文。替换当前正文；状态、预算与记账保留。',
   "tool.goal.blockerKey": '稳定的 blocker 键（op "block" 时使用）。',
   "tool.goal.blocker": '简短的 blocker 描述（op "block" 时使用）。',
   "tool.debug.description":

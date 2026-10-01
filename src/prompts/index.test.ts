@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { blockedWrapUp, budgetLimitPrompt, compactionSnapshot, continuationTrigger, goalCommandPrompt, goalContext, stopWrapUpPrompt, xmlEscape } from "./index"
+import { blockedWrapUp, budgetLimitPrompt, compactionSnapshot, continuationTrigger, goalContext, rewriteStoppedNote, stopWrapUpPrompt, xmlEscape } from "./index"
 import { createGoal } from "../model/goal"
 
 const goal = createGoal({ goalId: "g1", objective: "ship <it> & verify", now: 0, tokenBudget: 500 })
@@ -16,7 +16,8 @@ describe("goalContext", () => {
     expect(text).toContain("&lt;it&gt; &amp; verify")
     expect(text).toContain("Completion audit")
     expect(text).toContain('op "complete"')
-    expect(text).toContain('"budget"')
+    expect(text).toContain('"get"')
+    expect(text).toContain('"rewrite"')
     expect(text).not.toContain("Status:")
     expect(text).not.toContain("Tokens used")
     expect(text).not.toContain("Tokens remaining")
@@ -65,20 +66,23 @@ describe("continuationTrigger", () => {
 })
 
 describe("other templates", () => {
-  test("budgetLimitPrompt is a wrap-up instruction", () => {
-    expect(budgetLimitPrompt(goal, { maxObjectiveChars: 4000 })).toContain("budget")
-    expect(budgetLimitPrompt(goal, { maxObjectiveChars: 4000 })).toContain('op "budget"')
+  test("budgetLimitPrompt is a wrap-up instruction that never points at a removed op", () => {
+    const text = budgetLimitPrompt(goal, { maxObjectiveChars: 4000 })
+    expect(text).toContain("token budget")
+    expect(text).toContain("/goal-budget")
+    // budget op 已从模型工具移除；提示词不能引用不存在的 op。
+    expect(text).not.toContain('op "budget"')
+  })
+
+  test("rewriteStoppedNote tells the model the goal will not auto-continue", () => {
+    expect(rewriteStoppedNote("paused")).toContain("paused")
+    expect(rewriteStoppedNote("paused")).toContain("/goal-resume")
+    expect(rewriteStoppedNote("budget-limited")).toContain("/goal-budget")
   })
 
   test("blockedWrapUp names the blocker", () => {
     const blocked = { ...goal, status: "blocked" as const, blockerKey: "no-api-key", blockerStreak: 3 }
     expect(blockedWrapUp(blocked)).toContain("no-api-key")
-  })
-
-  test("goalCommandPrompt treats the argument as untrusted data", () => {
-    const text = goalCommandPrompt("build the thing")
-    expect(text).toContain("build the thing")
-    expect(text).toContain("goal")
   })
 
   test("stopWrapUpPrompt names the reason, forbids more work, and forbids tool calls", () => {
