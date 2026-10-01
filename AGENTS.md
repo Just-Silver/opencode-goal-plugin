@@ -18,6 +18,7 @@ OpenCode V2 的 goal 插件。单包、**零运行时依赖**、TS ESM，bun 直
 - **入口有两条不同路径**：本地目录安装找 `<dir>/server.ts` 与 `<dir>/tui.ts`（根下这两个都是转发器 → `src/`；`main`/`exports` **不参与**这条）；npm/git 安装走「包名 + `exports` 子路径」（`.` / `./server` / `./tui` / `./rpc`）。改入口时两条都要顾。
 - **`package.json.files` 决定发布内容**：`src/**/*.ts`（排除 `*.test.ts`）、`server.ts`、`tui.ts`、`CHANGELOG.md`。新增运行时文件必须落在这些路径内，否则不进 npm 包。
 - **注入 system 只放「生命周期内逐字节不变」的内容**：会随轮次变化的字段（用量、耗时、状态标签、时间戳…）一律走 messages（工具返回、续跑/停摆的合成消息，或 `hook("context")` 的 `input.messages`），或走**命令回执 toast**（RPC 事件 → TUI，0 token、不进上下文）——否则每轮击穿宿主打在「最后一个 system part」上的 prompt 缓存断点。详见 `docs/opencode/prompt-cache.md`。
+- **会击穿 prompt 缓存的改动，必须先告知用户并取得同意才能做**：凡改变**请求前缀**的改动——注入/改写 `system` part、增删或改写**工具**（描述 / schema / 工具表）、`disabled_tools` 的增删、以及任何其它改变 tools/system 前缀的东西——动手前**先向用户说明**「会造成**逐轮**失效还是**一次性**失效」，**得到用户明确同意才能改**（不要自行判断"影响不大"就直接改）。断点模型与本插件的失效触发清单见 `docs/opencode/prompt-cache.md`（§4.1）。
 - tsconfig：`verbatimModuleSyntax`（类型导入必须 `import type`）、`noUncheckedIndexedAccess`（索引访问为 `T | undefined`）、`include: ["src"]`。
 
 ## 架构
