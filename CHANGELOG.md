@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-01
+
+### Changed
+
+- **`/goal <目标>` 改为「用户直写」**：命令直接把目标**逐字**入库并起一轮，**不再转发给模型**——随之去掉「不够具体就先追问」「模型规范化目标」「模型判断不可执行就拒绝」。已有未完成目标时不覆盖（回执提示改用 `/goal-rebuild` 改正文或 `/goal-clear` 清除）。起跑轮只向模型投递**一行续跑触发**，目标本体与规则仍由 `goalContext` 注入 system（不重复）。删除仅服务于旧链路的 `goalCommandPrompt` 模板。起因：模型在创建时会曲解用户意图、造出不符合原意的目标。
+
+### Added
+
+- **模型工具新增 `goal(op:"rewrite")`**：替换目标正文并保留状态、预算与全部记账（与 `/goal-rebuild` 共用 `rebuildGoal`）；约束为**仅当用户明确要求改目标时**才调用。非 `active` 状态下改写会附一条提示（目标不会自动续跑，需 `/goal-resume`，预算用尽则先 `/goal-budget`），避免模型误以为「改完就继续跑了」；缺 `objective` 时返回精确报错；`objective` 的参数说明也写明必填与「状态/预算/记账保留」。
+
+### Removed
+
+- **模型工具的 `create` / `resume` / `drop` / `budget` 四个 op**：对齐 Codex——创建/改写目标、恢复、删除、改预算均归**用户命令**（`/goal`、`/goal-rebuild`、`/goal-resume`、`/goal-clear`、`/goal-budget`），模型不再能自行改这些状态。模型工具最终 op 为 `get` / `complete` / `rewrite` / `block`。
+
+### Fixed
+
+- **`budgetLimitPrompt` 不再引用已被移除的 `budget` op**：该提示词（预算用尽时作为 `block` 的 `instruction` 发给模型）结尾原为「Do not call goal with op "budget" …」，而 `budget` 已不是模型 op。改为说明「预算归用户，只有用户能用 `/goal-budget` 提高」。
+- **`block` 在非 `active` 状态下改为明确报错**：原先对 paused / blocked / budget-limited / usage-limited / complete 的目标上报 blocker 会「静默成功」（`blockerStreak` 不计数、也不附带任何提示），模型会误以为阻碍已上报。现与 `complete` 对齐，返回 `goal: cannot report a blocker for a ${status} goal`。
+
 ## [0.8.0] - 2026-09-28
 
 ### Added
