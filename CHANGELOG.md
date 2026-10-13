@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`goal` 工具返回改为紧凑文本**：原先返回一坨 pretty-print JSON（`{ goal: {…}, remainingTokens, completionBudgetReport, blockerStreak? }`），一次 `get` 约 24 行，含大量 `null` / `0` 噪声、重复字段（顶层 `remainingTokens` / `blockerStreak` 与 `goal.*` 重复，`completionBudgetReport` 与 `tokensUsed` / `tokenBudget` 重复）与模型用不上的内部字段（`goalId`、`createdAt`、`updatedAt`、`emptyStreak`、原始 `usage` 五项分项）。现改为**紧凑文本**：`Goal: <目标全文>` / `Status:` / `Tokens:`（含 `remaining`、`cache read`、`new work`），按需追加 `Active work:` / `Auto-continues:` / `Blocker:` / `Last error:`；空值 / 零值行省略；`instruction`（`rewrite` 非 active、`block` 达阈值 / 预算）改为正文后空一行追加；无目标时返回 `No goal is set for this session.`。同一次 `get` 从约 24 行降到 3 行。被删字段仍入库、`/goal-status` 照常显示。工具返回走 messages，不触碰 tools / system 前缀，**不击穿 prompt 缓存**。返回形状见 `docs/01-design-orientation.md` §3。
+
 ## [0.9.0] - 2026-10-01
 
 ### Changed

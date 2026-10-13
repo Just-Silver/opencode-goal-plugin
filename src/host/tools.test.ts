@@ -40,7 +40,7 @@ function makeDeps(overrides: Partial<GoalDeps> = {}): GoalDeps {
 }
 
 const ctx = { sessionID: "ses_1", agent: "build" }
-const parse = (result: { content: string }) => JSON.parse(result.content)
+const content = (result: { content: string }) => result.content
 
 /** 直接落一条目标（创建归用户命令，工具不再有 create）。 */
 function seed(deps: GoalDeps, goal = createGoal({ goalId: "g1", objective: "x", now: 0 })) {
@@ -54,17 +54,16 @@ describe("createGoalTool", () => {
       await expect(tool.execute({ op }, ctx)).rejects.toThrow(/op must be one of/)
   })
 
-  test("get returns null when no goal exists", async () => {
+  test("get reports no goal when none exists", async () => {
     const tool = createGoalTool(makeDeps())
-    expect(parse(await tool.execute({ op: "get" }, ctx)).goal).toBeNull()
+    expect(content(await tool.execute({ op: "get" }, ctx))).toContain("No goal is set for this session.")
   })
 
   test("get reports an existing goal", async () => {
     const deps = makeDeps()
     await seed(deps, createGoal({ goalId: "g1", objective: "finish X", now: 0 }))
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "get" }, ctx))
-    expect(result.goal.objective).toBe("finish X")
+    expect(content(await tool.execute({ op: "get" }, ctx))).toContain("Goal: finish X")
   })
 
   test("overlays the in-flight turn usage on tool results", async () => {
@@ -77,18 +76,18 @@ describe("createGoalTool", () => {
     })
     await seed(deps)
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "get" }, ctx))
-    expect(result.goal.tokensUsed).toBe(167)
-    expect(result.goal.timeUsedSeconds).toBe(3)
-    expect(result.completionBudgetReport).toContain("tokens used 167")
+    const text = content(await tool.execute({ op: "get" }, ctx))
+    expect(text).toContain("Tokens: 167 used")
+    expect(text).toContain("cache read 50, new work 117")
+    expect(text).toContain("Active work: 3s")
   })
 
   test("complete marks an active goal complete and then refuses again", async () => {
     const deps = makeDeps()
     await seed(deps)
     const tool = createGoalTool(deps)
-    const done = parse(await tool.execute({ op: "complete" }, ctx))
-    expect(done.goal.status).toBe("complete")
+    const done = content(await tool.execute({ op: "complete" }, ctx))
+    expect(done).toContain("Status: complete")
     await expect(tool.execute({ op: "complete" }, ctx)).rejects.toThrow(/cannot complete/)
   })
 
@@ -107,18 +106,18 @@ describe("createGoalTool", () => {
     await seed(deps)
     const tool = createGoalTool(deps)
     await tool.execute({ op: "block", blocker_key: "no-key", blocker: "missing key" }, ctx)
-    const second = parse(await tool.execute({ op: "block", blocker_key: "no-key", blocker: "missing key" }, ctx))
-    expect(second.goal.status).toBe("blocked")
-    expect(second.instruction).toContain("no-key")
+    const second = content(await tool.execute({ op: "block", blocker_key: "no-key", blocker: "missing key" }, ctx))
+    expect(second).toContain("Status: blocked")
+    expect(second).toContain("no-key")
   })
 
   test("block reaching the budget limit returns the budget instruction", async () => {
     const deps = makeDeps({ options: { ...DEFAULT_OPTIONS, blockedThreshold: 3, tokenBudget: 5 } })
     await seed(deps, { ...createGoal({ goalId: "g1", objective: "x", now: 0, tokenBudget: 5 }), tokensUsed: 5 })
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
-    expect(result.goal.status).toBe("budget-limited")
-    expect(result.instruction).toContain("token budget")
+    const result = content(await tool.execute({ op: "block", blocker_key: "k", blocker: "stuck" }, ctx))
+    expect(result).toContain("Status: budget-limited")
+    expect(result).toContain("token budget")
   })
 
   test("refuses a blocker report on a non-active goal instead of silently doing nothing", async () => {
@@ -158,11 +157,10 @@ describe("rewrite op", () => {
       continuations: 3,
     })
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "rewrite", objective: "  new objective  " }, ctx))
-    expect(result.goal.objective).toBe("new objective")
-    expect(result.goal.status).toBe("paused")
-    expect(result.goal.tokenBudget).toBe(500)
-    expect(result.goal.tokensUsed).toBe(42)
+    const result = content(await tool.execute({ op: "rewrite", objective: "  new objective  " }, ctx))
+    expect(result).toContain("Goal: new objective")
+    expect(result).toContain("Status: paused")
+    expect(result).toContain("Tokens: 42 used / 500 budget · 458 remaining")
     const stored = await deps.repo.load("ses_1")
     expect(stored?.objective).toBe("new objective")
     expect(stored?.status).toBe("paused")
@@ -199,18 +197,19 @@ describe("rewrite op", () => {
     const deps = makeDeps()
     await seed(deps, { ...createGoal({ goalId: "g1", objective: "old", now: 0 }), status: "paused" as const })
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "rewrite", objective: "new" }, ctx))
-    expect(result.goal.objective).toBe("new")
-    expect(result.goal.status).toBe("paused")
-    expect(result.instruction).toContain("/goal-resume")
+    const result = content(await tool.execute({ op: "rewrite", objective: "new" }, ctx))
+    expect(result).toContain("Goal: new")
+    expect(result).toContain("Status: paused")
+    expect(result).toContain("/goal-resume")
   })
 
   test("on an active goal it returns no instruction", async () => {
     const deps = makeDeps()
     await seed(deps)
     const tool = createGoalTool(deps)
-    const result = parse(await tool.execute({ op: "rewrite", objective: "new" }, ctx))
-    expect(result.instruction).toBeUndefined()
+    const result = content(await tool.execute({ op: "rewrite", objective: "new" }, ctx))
+    expect(result).not.toContain("/goal-resume")
+    expect(result).not.toContain("will not auto-continue")
   })
 
   test("is refused for a restricted agent and writes nothing", async () => {

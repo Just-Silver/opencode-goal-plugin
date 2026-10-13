@@ -1,66 +1,57 @@
-import type { Goal, GoalLastError, GoalStatus, GoalUsage } from "./types"
+import type { Goal } from "./types"
 import { newWorkOf, usageIsComplete } from "./usage"
 
-export interface GoalView {
-  readonly goalId: string
-  readonly status: GoalStatus
-  readonly objective: string
-  readonly tokenBudget: number | null
-  readonly tokensUsed: number
-  /** 分项累计；旧记录（0.1.0 及以前）为 null。 */
-  readonly usage: GoalUsage | null
-  readonly timeUsedSeconds: number
-  /** 自动续跑累计次数。 */
-  readonly continuations: number
-  readonly blockerKey: string | null
-  readonly blockerText: string | null
-  readonly lastError: GoalLastError | null
-  readonly blockerStreak: number
-  readonly emptyStreak: number
-  readonly createdAt: number
-  readonly updatedAt: number
+/** 无目标时的工具返回。 */
+export const NO_GOAL_RESULT = "No goal is set for this session."
+
+/**
+ * 耗时短格式。工具输出**不本地化**（见 AGENTS.md），故不经 `i18n.formatDuration`，
+ * 单位固定为 `d/h/m/s`。
+ */
+function formatElapsed(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const unit = (n: number, suffix: string) => `${n}${suffix}`
+  const join = (first: string, second: string | undefined) => (second ? `${first} ${second}` : first)
+  if (total < 60) return unit(total, "s")
+  const minutes = Math.floor(total / 60)
+  if (total < 3600) {
+    const rest = total % 60
+    return join(unit(minutes, "m"), rest > 0 ? unit(rest, "s") : undefined)
+  }
+  const hours = Math.floor(total / 3600)
+  if (total < 86400) {
+    const rest = Math.floor((total % 3600) / 60)
+    return join(unit(hours, "h"), rest > 0 ? unit(rest, "m") : undefined)
+  }
+  const rest = Math.floor((total % 86400) / 3600)
+  return join(unit(Math.floor(total / 86400), "d"), rest > 0 ? unit(rest, "h") : undefined)
 }
 
-export interface ToolResult {
-  readonly goal: GoalView
-  readonly remainingTokens: number | null
-  readonly completionBudgetReport: string
-  readonly blockerStreak?: number
+function tokenLine(goal: Goal): string {
+  // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）；
+  // 两项都为 0 时是无信息噪声（如全新目标），同样省略。
+  const usage = goal.usage && usageIsComplete(goal) ? goal.usage : null
+  const newWork = usage ? newWorkOf(usage) : 0
+  const breakdown = usage && (usage.cacheRead > 0 || newWork > 0) ? ` · cache read ${usage.cacheRead}, new work ${newWork}` : ""
+  if (goal.tokenBudget === undefined) return `Tokens: ${goal.tokensUsed} used (no budget)${breakdown}`
+  const remaining = Math.max(0, goal.tokenBudget - goal.tokensUsed)
+  return `Tokens: ${goal.tokensUsed} used / ${goal.tokenBudget} budget · ${remaining} remaining${breakdown}`
 }
 
 /**
- * 工具返回值。`objective` 始终是全文（模型靠 `goal(op="get")` 取回完整目标，
- * 故此处不做截断；截断只发生在提示词注入）。
+ * 工具返回值：**紧凑文本**，只列对模型有决策价值的事实，空值 / 零值行直接省略。
+ *
+ * `objective` 始终是全文——模型靠 `goal(op="get")` 取回完整目标，故此处不做截断；
+ * 截断只发生在提示词注入。
  */
-export function buildToolResult(goal: Goal): ToolResult {
-  const remaining = goal.tokenBudget === undefined ? null : Math.max(0, goal.tokenBudget - goal.tokensUsed)
-  // 分项只在「和 == tokensUsed」时展示（旧记录升级后不满足 → 只给总量）。
-  const usage = goal.usage && usageIsComplete(goal) ? goal.usage : null
-  const breakdown = usage ? ` (cacheRead ${usage.cacheRead}, new work ${newWorkOf(usage)})` : ""
-  const completionBudgetReport =
-    goal.tokenBudget === undefined
-      ? `no token budget; tokens used ${goal.tokensUsed}${breakdown}`
-      : `tokens used ${goal.tokensUsed} / budget ${goal.tokenBudget}; remaining ${remaining}${breakdown}`
-  return {
-    goal: {
-      goalId: goal.goalId,
-      status: goal.status,
-      objective: goal.objective,
-      tokenBudget: goal.tokenBudget ?? null,
-      tokensUsed: goal.tokensUsed,
-      usage,
-      timeUsedSeconds: goal.timeUsedSeconds,
-      continuations: goal.continuations ?? 0,
-      blockerKey: goal.blockerKey ?? null,
-      blockerText: goal.blockerText ?? null,
-      lastError: goal.lastError ?? null,
-      blockerStreak: goal.blockerStreak,
-      emptyStreak: goal.emptyStreak,
-      createdAt: goal.createdAt,
-      updatedAt: goal.updatedAt,
-    },
-    remainingTokens: remaining,
-    completionBudgetReport,
-    ...(goal.blockerStreak > 0 ? { blockerStreak: goal.blockerStreak } : {}),
+export function buildToolResult(goal: Goal): string {
+  const lines = [`Goal: ${goal.objective}`, `Status: ${goal.status}`, tokenLine(goal)]
+  if (goal.timeUsedSeconds > 0) lines.push(`Active work: ${formatElapsed(goal.timeUsedSeconds)}`)
+  if ((goal.continuations ?? 0) > 0) lines.push(`Auto-continues: ${goal.continuations}`)
+  if (goal.blockerStreak > 0 || goal.blockerKey) {
+    const text = goal.blockerText ? ` — ${goal.blockerText}` : ""
+    lines.push(`Blocker: "${goal.blockerKey ?? "unknown"}" reported ${goal.blockerStreak}x${text}`)
   }
+  if (goal.lastError) lines.push(`Last error: ${goal.lastError.type}: ${goal.lastError.message}`)
+  return lines.join("\n")
 }

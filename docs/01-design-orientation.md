@@ -52,7 +52,7 @@ goal({
 
 - 模型可 `complete` / `block`（block 仅"报告"，是否 blocked 由服务端裁决）；`rewrite` **仅当用户明确要求改目标时**才调用。
 - **`create` / `resume` / `drop` / `budget` 不暴露为 op**（归用户命令；对齐 Codex——OMP 模型可 resume/drop，此处取更严一侧）。
-- 返回：`{ goal, remainingTokens, completionBudgetReport, blockerStreak? }`。
+- 返回：**紧凑文本**（`model/tool-result.ts` 的 `buildToolResult`）——首行 `Goal: <目标全文>`，随后 `Status:` / `Tokens:`（含 `remaining`、`cache read`、`new work`），再按需追加 `Active work:` / `Auto-continues:` / `Blocker:` / `Last error:`；`instruction`（改写非 active、block 达阈值/预算）作为一段附在**正文后空一行**。只列对模型有决策价值的事实，空值 / 零值行省略；无目标时返回 `No goal is set for this session.`。内部字段（`goalId`、`createdAt`/`updatedAt`、原始 `usage` 分项、`emptyStreak`）不进工具返回，但仍入库、`/goal-status` 照常显示。
 
 ## 4. 状态机 **[定]**
 

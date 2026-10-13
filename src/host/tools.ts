@@ -4,7 +4,7 @@ import { complete, rebuild } from "../model/goal"
 import { applyBudget } from "../model/limits"
 import { normalizeObjective } from "../model/objective"
 import { parseToolArgs } from "../model/tool-args"
-import { buildToolResult } from "../model/tool-result"
+import { buildToolResult, NO_GOAL_RESULT } from "../model/tool-result"
 import type { Goal } from "../model/types"
 import { withPending } from "../model/usage"
 import { blockedWrapUp, budgetLimitPrompt, rewriteStoppedNote } from "../prompts/index"
@@ -43,8 +43,13 @@ export interface GoalToolDefinition {
   readonly execute: (input: any, context: GoalToolContext) => Promise<{ content: string }>
 }
 
-function asContent(value: unknown): { content: string } {
-  return { content: JSON.stringify(value, null, 2) }
+/** 附加指令跟在结果正文后空一行，避免模型把两者混读。 */
+function withInstruction(text: string, instruction: string): string {
+  return `${text}\n\n${instruction}`
+}
+
+function asContent(text: string): { content: string } {
+  return { content: text }
 }
 
 export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
@@ -64,7 +69,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
 
       switch (args.op) {
         case "get": {
-          return asContent(existing ? view(existing) : { goal: null })
+          return asContent(existing ? view(existing) : NO_GOAL_RESULT)
         }
 
         case "complete": {
@@ -85,7 +90,7 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           await deps.repo.save(sessionID, goal)
           const result = view(goal)
           // 改写只换正文、不恢复执行：非 active 时明确告诉模型目标不会自动续跑，别以为「改完就跑了」。
-          if (goal.status !== "active") return asContent({ ...result, instruction: rewriteStoppedNote(goal.status) })
+          if (goal.status !== "active") return asContent(withInstruction(result, rewriteStoppedNote(goal.status)))
           return asContent(result)
         }
 
@@ -103,13 +108,14 @@ export function createGoalTool(deps: GoalDeps): GoalToolDefinition {
           const goal = applyBudget(reported, now)
           await deps.repo.save(sessionID, goal)
           const result = view(goal)
-          if (goal.status === "blocked" && blocked)
-            return asContent({ ...result, instruction: blockedWrapUp(goal) })
+          if (goal.status === "blocked" && blocked) return asContent(withInstruction(result, blockedWrapUp(goal)))
           if (goal.status === "budget-limited")
-            return asContent({
-              ...result,
-              instruction: budgetLimitPrompt(goal, { maxObjectiveChars: deps.options.maxObjectiveChars }),
-            })
+            return asContent(
+              withInstruction(
+                result,
+                budgetLimitPrompt(goal, { maxObjectiveChars: deps.options.maxObjectiveChars }),
+              ),
+            )
           return asContent(result)
         }
       }
