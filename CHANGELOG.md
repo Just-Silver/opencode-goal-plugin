@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-29
+
+### Deprecated
+
+- **插件停止维护，改用 OpenCode 内置 goal**：宿主 V2 已内置 goal 插件（`opencode.goal`，随核心加载、无需安装；命令 `/goal <目标>`，控制用 `/goal pause | resume | clear`，空闲时由独立的 reviewer 请求判定是否达成）。本仓库不再更新并将归档。README 顶部已加醒目提示，并写明**与内置 goal 同时使用的风险**：两者都注册 `/goal`，命令表按激活顺序后者覆盖（配置插件在 `internal.pre` 之后激活），且同一会话同时设两个目标会双续跑。本次仅改文档与版本号，代码零改动。
+
 ## [0.10.0] - 2026-10-14
 
 ### Changed

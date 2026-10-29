@@ -1,5 +1,11 @@
 # opencode-goal-plugin
 
+> **已停止维护（2026-10-29）**：OpenCode V2 **已内置 goal**——`/goal <目标>`，随后用 `/goal pause | resume | clear` 控制，随核心加载、无需安装。本插件不再更新，仓库将归档。
+>
+> - **请改用内置 goal。** 本仓库不再接受 issue / PR。
+> - 想继续用旧版：`@justsilver/opencode-goal-plugin@0.10.0` 行为不变，额外提供 token 预算与用量记账、`/goal-status|-pause|-resume|-clear|-budget|-rebuild|-debug` 确定性命令与 `goal` 工具。
+> - ⚠️ **不要与内置 goal 同时用**：两者都注册 `/goal`，后加载的插件会覆盖同名命令；同一会话同时设两个目标会双续跑、双倍消耗。
+
 给 OpenCode V2 加**持久目标**：说一次目标，它记住、自己接着干，完成时拿证据说话。
 
 ## 安装
